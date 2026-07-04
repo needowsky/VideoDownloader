@@ -9,6 +9,7 @@ set "LANG=en"
 :: GitHub source used to download the newest program files.
 set "GITHUB_UPDATES=1"
 set "GITHUB_REPO=needowsky/VideoDownloader"
+set "GITHUB_DOWNLOAD_MODE=release"
 set "GITHUB_BRANCH=main"
 set "APP_DIR=%CD%"
 set "TOTAL_STEPS=7"
@@ -25,6 +26,7 @@ set "INSTALL_LOG=%APP_DIR%\logs\install_debug_log.txt"
 >> "%INSTALL_LOG%" echo Date: %DATE% %TIME%
 >> "%INSTALL_LOG%" echo DEBUG=%DEBUG%
 >> "%INSTALL_LOG%" echo GITHUB_REPO=%GITHUB_REPO%
+>> "%INSTALL_LOG%" echo GITHUB_DOWNLOAD_MODE=%GITHUB_DOWNLOAD_MODE%
 >> "%INSTALL_LOG%" echo GITHUB_BRANCH=%GITHUB_BRANCH%
 echo.
 call :StepStart 1 "Downloading program files"
@@ -144,6 +146,10 @@ exit /b 0
 
 :DownloadProgramFiles
 if /i not "%GITHUB_UPDATES%"=="1" exit /b 1
+if /i "%GITHUB_DOWNLOAD_MODE%"=="release" (
+    call :DownloadProgramFilesFromLatestRelease
+    if not errorlevel 1 exit /b 0
+)
 call :DownloadProgramFilesFromBranch "%GITHUB_BRANCH%"
 if not errorlevel 1 exit /b 0
 if /i not "%GITHUB_BRANCH%"=="master" (
@@ -151,6 +157,14 @@ if /i not "%GITHUB_BRANCH%"=="master" (
     if not errorlevel 1 exit /b 0
 )
 exit /b 1
+
+:DownloadProgramFilesFromLatestRelease
+if "%DEBUG%"=="1" (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $repo='%GITHUB_REPO%'; $api='https://api.github.com/repos/' + $repo + '/releases/latest'; $release=Invoke-RestMethod -Uri $api -Headers @{'User-Agent'='VideoDownloaderInstaller'}; $zipUrl=$release.zipball_url; if(-not $zipUrl){ throw 'No zipball_url in latest release' }; $zip=Join-Path $env:TEMP 'vd_latest_release.zip'; $tmp=Join-Path $env:TEMP ('vd_release_'+[guid]::NewGuid().ToString()); Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -Headers @{'User-Agent'='VideoDownloaderInstaller'} -OutFile $zip; Expand-Archive -Force -Path $zip -DestinationPath $tmp; $root=Get-ChildItem -Path $tmp -Directory | Select-Object -First 1; if(-not $root){ throw 'Release archive is empty' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','README.md','LICENSE'); foreach($file in $files){ $src=Join-Path $root.FullName $file; if(-not (Test-Path $src)){ throw ('Missing file in release: ' + $file) }; Copy-Item -Force -LiteralPath $src -Destination $file }; exit 0"
+) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $repo='%GITHUB_REPO%'; $api='https://api.github.com/repos/' + $repo + '/releases/latest'; $release=Invoke-RestMethod -Uri $api -Headers @{'User-Agent'='VideoDownloaderInstaller'}; $zipUrl=$release.zipball_url; if(-not $zipUrl){ throw 'No zipball_url in latest release' }; $zip=Join-Path $env:TEMP 'vd_latest_release.zip'; $tmp=Join-Path $env:TEMP ('vd_release_'+[guid]::NewGuid().ToString()); Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -Headers @{'User-Agent'='VideoDownloaderInstaller'} -OutFile $zip; Expand-Archive -Force -Path $zip -DestinationPath $tmp; $root=Get-ChildItem -Path $tmp -Directory | Select-Object -First 1; if(-not $root){ throw 'Release archive is empty' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','README.md','LICENSE'); foreach($file in $files){ $src=Join-Path $root.FullName $file; if(-not (Test-Path $src)){ throw ('Missing file in release: ' + $file) }; Copy-Item -Force -LiteralPath $src -Destination $file }; exit 0" >> "%INSTALL_LOG%" 2>&1
+)
+exit /b %ERRORLEVEL%
 
 :DownloadProgramFilesFromBranch
 set "DOWNLOAD_BRANCH=%~1"

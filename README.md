@@ -58,13 +58,15 @@ python youtube_downloader.py
 
 ## Installer
 
-`zainstaluj_wszystko.bat` can be copied by itself to another Windows computer. It downloads the current program files from GitHub and prepares dependencies.
+`zainstaluj_wszystko.bat` can be copied by itself to another Windows computer. It downloads the current program files from the latest GitHub release and prepares dependencies.
 
 Program files are downloaded from:
 
 ```text
-https://github.com/needowsky/VideoDownloader
+https://github.com/needowsky/VideoDownloader/releases
 ```
+
+If the latest release cannot be downloaded, the installer falls back to raw files from the configured branch.
 
 The installer checks for existing components before downloading anything:
 
