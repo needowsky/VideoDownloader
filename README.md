@@ -4,6 +4,10 @@ A Windows console downloader written in Python. It can download audio, video and
 
 The default interface language is English. Polish is available with `LANG=pl`.
 
+## Repository
+
+GitHub: [needowsky/VideoDownloader](https://github.com/needowsky/VideoDownloader)
+
 ## Features
 
 - Download MP3 audio.
@@ -54,7 +58,13 @@ python youtube_downloader.py
 
 ## Installer
 
-`zainstaluj_wszystko.bat` can be copied by itself to another Windows computer. It recreates the program files and prepares dependencies.
+`zainstaluj_wszystko.bat` can be copied by itself to another Windows computer. It downloads the current program files from GitHub and prepares dependencies.
+
+Program files are downloaded from:
+
+```text
+https://github.com/needowsky/VideoDownloader
+```
 
 The installer checks for existing components before downloading anything:
 
