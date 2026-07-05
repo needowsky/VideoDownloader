@@ -1,48 +1,75 @@
 # Video Downloader
 
-A Windows console downloader written in Python. It can download audio, video and selected photo content through `yt-dlp` and `gallery-dl`, with a quiet progress view, automatic dependency setup and basic error guidance.
+Windows console downloader written in Python.
 
-The default interface language is English. Polish is available with `LANG=pl`.
+Current version: `v2.0`
 
-## Repository
+Repository: https://github.com/needowsky/VideoDownloader
 
-GitHub: [needowsky/VideoDownloader](https://github.com/needowsky/VideoDownloader)
+## One-Command Install
 
-## Features
+Run this in PowerShell:
 
-- Download MP3 audio.
-- Download MP4 video in the highest available quality.
-- Download from a single URL, YouTube playlist, YouTube channel or `.txt` file.
-- Automatic site detection for links supported by `yt-dlp`.
-- Built-in handling for common sources such as YouTube, Instagram, TikTok, Facebook, Pornhub and Beeg.
-- Photo downloading for Instagram, TikTok and Facebook through `gallery-dl`.
-- YouTube channel preflight check with detected item count, estimated size and confirmation.
-- Clean progress display: title, progress bar, percent, downloaded MB and speed.
-- Automatic retry flow with 3 fallback attempts.
-- Error log with recognized problem type, likely reason and repair hint.
-- Save-folder and URL validation before downloading.
-- English/Polish UI switch.
-- Offline Snake mini-game when there is no internet connection.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/needowsky/VideoDownloader/main/install.ps1 | iex"
+```
 
-## Legal Notice
+This downloads the full AIO installer from GitHub, applies settings and launches dependency setup. The installer then downloads or verifies Python, pip, FFmpeg, `yt-dlp`, `gallery-dl`, `spotDL` and `OF-Scraper`.
 
-Use this tool only for content you own, content you are allowed to download, or content available under a license that permits downloading. You are responsible for following each website's terms of service and applicable law.
+## What It Does
 
-## Quick Start
+Video Downloader downloads audio, video, photos and large files from supported sources using proven tools such as `yt-dlp`, `gallery-dl`, `spotDL` and `OF-Scraper`.
 
-Download or clone the repository, then run:
+Use it only for content you own, content you are allowed to download, or content distributed under a license that permits downloading. The app does not bypass DRM, paywalls or unauthorized access.
+
+## Main Features
+
+- MP3 audio downloads.
+- MP4 video downloads in the highest available quality.
+- Automatic input detection for single links, multiple links, YouTube playlists, YouTube channels and `.txt` files.
+- YouTube channel preflight with item count, estimated size and confirmation.
+- Instagram, TikTok and Facebook photo downloads through `gallery-dl`.
+- Spotify mode through `spotDL` metadata matching with YouTube/YouTube Music.
+- Authorized OnlyFans workflows through direct media links or optional OF-Scraper integration.
+- Naughties/adult video sources supported by `yt-dlp`, including Pornhub, Beeg and similar sites.
+- Large-file manager for `.zip`, `.rar`, `.7z`, `.iso`, Google Drive, Mega and GitHub links.
+- GitHub repository links can resolve latest release assets with file selection or download-all.
+- `.part` resume, retry handling and queue recovery for large downloads.
+- Disk-full recovery by moving partial downloads to another folder when possible.
+- Clean progress display with title, progress bar, percent, downloaded MB and speed.
+- File validation after download: size, MD5 and SHA256 when available.
+- Error logs with recognized error type, reason and repair hint.
+- English/Polish interface through `config/lang/*.lang`.
+- Runtime settings in `config/config.json`.
+- Commands: `help`, `stats`, `stats naughties`, `sites`, `settings`, `update`, `history`, `about`, `doctor`, `open downloads`, `open logs`, `ping`, `resume`.
+
+## Manual Install
+
+Download the repository/release and run:
 
 ```text
 zainstaluj_wszystko.bat
 ```
 
-The all-in-one installer prepares the app and required components. After installation, start the app with:
+The installer:
+
+- asks for administrator permission,
+- installs the app into `C:\Program Files\VideoDownloader`,
+- creates a desktop shortcut named `Video Downloader`,
+- downloads app files from GitHub releases,
+- checks whether components are already installed before downloading them,
+- installs or verifies Python, pip, FFmpeg, `yt-dlp`, `gallery-dl`, `spotDL` and `OF-Scraper`,
+- hides technical logs by default when `DEBUG=0`.
+
+## Run
+
+Use the desktop shortcut or run:
 
 ```text
 uruchom_downloader.bat
 ```
 
-or:
+Manual run:
 
 ```powershell
 python youtube_downloader.py
@@ -50,243 +77,149 @@ python youtube_downloader.py
 
 ## Included Files
 
-- `zainstaluj_wszystko.bat` - all-in-one installer
-- `youtube_downloader.py` - main application
-- `uruchom_downloader.bat` - launcher
-- `README.md` - documentation
-- `LICENSE` - MIT license
-
-## Installer
-
-`zainstaluj_wszystko.bat` can be copied by itself to another Windows computer. It downloads the current program files from the latest GitHub release and prepares dependencies.
-
-Program files are downloaded from:
-
 ```text
-https://github.com/needowsky/VideoDownloader/releases
+youtube_downloader.py
+zainstaluj_wszystko.bat
+install.ps1
+uruchom_downloader.bat
+README.md
+CHANGELOG.md
+LICENSE
+config/config.json
+config/lang/en.lang
+config/lang/pl.lang
 ```
-
-If the latest release cannot be downloaded, the installer falls back to raw files from the configured branch.
-
-The installer checks for existing components before downloading anything:
-
-- Python 3
-- pip
-- FFmpeg
-- yt-dlp
-- gallery-dl
-
-By default, technical installation details are hidden:
-
-```bat
-set "DEBUG=0"
-```
-
-Change it to:
-
-```bat
-set "DEBUG=1"
-```
-
-to show full installer logs.
-
-Default installer language:
-
-```bat
-set "LANG=en"
-```
-
-Change it to `pl` before running the installer if you want the generated program to start in Polish.
 
 ## Usage
 
-On startup, choose what to download:
+On startup, choose what you want to download:
 
-1. MP3 - audio only
-2. MP4 - video
-3. Photos
+```text
+1. Download link, playlist, channel or .txt file
+2. Download large file
+3. Settings
+4. Exit
+```
 
-Then choose the source:
-
-1. Single link
-2. YouTube playlist
-3. `.txt` file with links
-4. YouTube channel
+For MP3/MP4/photo/Spotify/OnlyFans flows, paste a link, multiple links or a `.txt` file path. Type `q` to return to the menu.
 
 For `.txt` files, put one URL per line. Lines starting with `#` are ignored.
 
-In single-link mode, the app returns to the URL prompt after each download. Type `q` to return to the menu.
+After a completed download, the app clears the console and shows:
 
-## YouTube Channels
+- saved items,
+- file validation,
+- size,
+- MD5/SHA256 when available,
+- clickable save folder link in Windows Terminal.
 
-For best results, paste a direct channel tab URL:
-
-```text
-https://www.youtube.com/@channel/videos
-https://www.youtube.com/@channel/releases
-https://www.youtube.com/@channel/streams
-```
-
-Before downloading a whole channel, the app checks available entries and shows:
-
-- detected item count
-- selected output type
-- estimated size
-- confirmation prompt
-
-The size is an estimate because YouTube does not always expose complete format data before download.
-
-## Output Folder
-
-Default output folder:
+Validation reports are appended to:
 
 ```text
-%USERPROFILE%\Downloads\YouTube Downloader
+logs/download_validation.txt
 ```
 
-You can choose another folder at runtime.
+Error details are written to:
 
-After a download finishes, the app clears the console and shows a summary with a clickable folder link in Windows Terminal.
+```text
+logs/log_error_data.txt
+```
+
+## Large Files
+
+The large-file manager supports:
+
+- direct `.zip`, `.rar`, `.7z`, `.iso` links,
+- Google Drive,
+- Mega,
+- GitHub raw/blob/archive links,
+- GitHub repository links with latest-release asset selection.
+
+During large downloads, temporary data is saved as `.part`. If the app or computer closes unexpectedly, the queue is saved in:
+
+```text
+download_queue.txt
+```
+
+Type:
+
+```text
+resume
+```
+
+to continue pending downloads.
 
 ## Configuration
 
-Main settings are near the top of `youtube_downloader.py`:
+Runtime configuration:
 
-```python
-DEBUG = 0
-LANG = "en"
+```text
+config/config.json
 ```
 
-Use:
+Language files:
 
-```python
-DEBUG = 1
+```text
+config/lang/en.lang
+config/lang/pl.lang
 ```
 
-to show full technical logs from `yt-dlp` and related tools.
+The app detects available `.lang` files and validates that each language file is valid JSON with string keys and values.
 
-Use:
-
-```python
-LANG = "pl"
-```
-
-to start the app in Polish.
-
-You can also switch language during runtime by typing:
+You can switch language during runtime:
 
 ```text
 lang=en
 lang=pl
 ```
 
-## Progress Display
-
-With `DEBUG=0`, the app hides noisy downloader logs and shows the useful status only:
-
-- media title
-- progress bar
-- percent
-- downloaded MB
-- download speed
-- conversion/saving status
-
-## Errors And Logs
-
-When an error occurs, the app writes:
-
-```text
-logs\log_error_data.txt
-```
-
-The log includes:
-
-- date and time
-- error description
-- context
-- recognized error type
-- likely reason
-- short repair instruction
-- technical traceback when available
-
-Common recognized problems include missing FFmpeg, missing or outdated `yt-dlp`, missing `gallery-dl`, invalid URLs, login-only/private content, network timeouts, save-folder permission issues and unavailable media formats.
-
-For download failures, the app automatically tries 3 strategies:
-
-1. Standard selected format.
-2. Retry with longer timeout and safer connection settings.
-3. Fallback format selection when the requested quality is unavailable.
-
-## Stats
-
-The main menu shows a download counter and rank.
-
-English ranks:
-
-```text
-rookie, novice, regular, collector, veteran, legend
-```
-
-Polish ranks:
-
-```text
-swiezak, nowicjusz, regular, kolekcjoner, weteran, legenda
-```
-
-After more than 9000 downloads, the rank changes to:
-
-```text
-OVER 9000!
-```
-
-The counter is stored primarily inside `youtube_downloader.py` as a small hex little-endian value. If the program cannot update its own file, it falls back to hidden local stats files.
-
-## Offline Mode
-
-At startup, the app checks for an internet connection. If no connection is available, it starts an offline Snake mini-game.
-
-Snake stores:
-
-- best score
-- total score
-
-The scoreboard uses the same hidden/encoded style as the download counter and is validated on startup.
-
-## Special Commands
-
-These commands can be typed in most input fields:
+## Useful Commands
 
 ```text
 help
+stats
+stats naughties
+sites
+settings
+update
+history
+about
+doctor
+open downloads
+open logs
+ping
+resume
+```
+
+Easter eggs:
+
+```text
 iamtheone
 imblue
 gothic
-lang=en
-lang=pl
+snake
+konami
+rickroll
+godmode
 ```
 
-`gothic` opens this YouTube link in the default browser:
+## Update
+
+Type:
 
 ```text
-https://www.youtube.com/watch?v=DLyqSQhS6E0
+update
 ```
 
-## Requirements
+The app checks the latest GitHub release, compares it with local `APP_VERSION`, and downloads newer app files when available.
 
-The installer can prepare everything automatically. Manual requirements are:
+## Notes
 
-- Windows
-- Python 3
-- FFmpeg
-- yt-dlp
-- gallery-dl
-
-Manual Python package installation:
-
-```powershell
-python -m pip install --upgrade yt-dlp gallery-dl
-```
+- Spotify mode does not download protected Spotify streams. It uses metadata matching through `spotDL`.
+- OnlyFans support is limited to authorized direct media links or external OF-Scraper workflows.
+- Private/login-required Facebook downloads can use browser cookies or `cookies.txt`.
+- Adult-site support depends on your installed `yt-dlp` version and each site's current extractor support.
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE).
+MIT License. See `LICENSE`.
