@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.1
+
+Focused polish release for updater safety, installer wording and playlist handling.
+
+### Added
+
+- Added external `update.bat` updater. The app now launches it and closes before replacing files from a newer GitHub release.
+- Added YouTube playlist preflight with detected item count, estimated size and confirmation before downloading all items.
+- Added `q` stop control during active yt-dlp downloads.
+
+### Changed
+
+- App version is now `v2.1`.
+- Installer step text now says `Downloading application files` instead of `Downloading program files`.
+- Installer progress now shows step percent and overall percent, and installed components are reported as already installed, installed, or checked for updates.
+- Installer now retries failed Python package installs with fallback methods, including Python 3.12/VC++ preparation, `--prefer-binary`, and user-site installation.
+- Improved menu navigation by clearing previous screens and adding back options in download submenus.
+
+### Fixed
+
+- Fixed YouTube playlist/channel statistics so counters use completed items instead of the preflight/expected item count.
+
 ## v2.0
 
 Major project refresh focused on installation, configuration, automatic detection, large-file reliability and clearer download validation.
@@ -61,6 +83,13 @@ Major project refresh focused on installation, configuration, automatic detectio
 
 ### Fixed
 
+- Fixed YouTube `HTTP 403 Forbidden` download-data errors being reported as unknown errors.
+- Added a stronger YouTube fallback strategy with browser-like headers and alternate extractor clients.
+- Fixed Beeg and similar extractor/server failures such as `HTTP 500 Internal Server Error` being reported as unknown errors.
+- Fixed installer dependency failures on Python 3.14 by preferring compatible Python versions and installing Python 3.12 when needed.
+- Installer now checks for Microsoft C++ Build Tools and installs the Visual Studio 2022 C++ workload when missing.
+- Improved installer messages for `spotDL` and `OF-Scraper` dependency failures caused by missing wheels or build tools.
+- PowerShell bootstrap now forces fresh GitHub branch downloads for the AIO installer to avoid stale release files during setup.
 - Fixed old menu content remaining visible after download completion.
 - Fixed repeated progress lines during conversion/saving.
 - Improved progress layout stability when resizing the console window.

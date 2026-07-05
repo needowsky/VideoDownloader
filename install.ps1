@@ -97,6 +97,7 @@ function Update-InstallerSettings {
     $text = $text -replace 'set "DEBUG=[01]"', ('set "DEBUG=' + $debugValue + '"')
     $text = $text -replace 'set "LANG=(en|pl)"', ('set "LANG=' + $Lang + '"')
     $text = $text -replace 'set "GITHUB_REPO=[^"]+"', ('set "GITHUB_REPO=' + $Repo + '"')
+    $text = $text -replace 'set "GITHUB_DOWNLOAD_MODE=[^"]+"', 'set "GITHUB_DOWNLOAD_MODE=branch"'
     $text = $text -replace 'set "GITHUB_BRANCH=[^"]+"', ('set "GITHUB_BRANCH=' + $Branch + '"')
     $text = $text -replace 'if not defined INSTALL_DIR set "INSTALL_DIR=[^"]+"', ('if not defined INSTALL_DIR set "INSTALL_DIR=' + $InstallDir + '"')
 

@@ -2,7 +2,7 @@
 
 Windows console downloader written in Python.
 
-Current version: `v2.0`
+Current version: `v2.1`
 
 Repository: https://github.com/needowsky/VideoDownloader
 
@@ -14,7 +14,7 @@ Run this in PowerShell:
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/needowsky/VideoDownloader/main/install.ps1 | iex"
 ```
 
-This downloads the full AIO installer from GitHub, applies settings and launches dependency setup. The installer then downloads or verifies Python, pip, FFmpeg, `yt-dlp`, `gallery-dl`, `spotDL` and `OF-Scraper`.
+This downloads the full AIO installer from GitHub, applies settings and launches dependency setup. The installer then downloads or verifies Python, pip, Microsoft C++ Build Tools, FFmpeg, `yt-dlp`, `gallery-dl`, `spotDL` and `OF-Scraper`.
 
 ## What It Does
 
@@ -27,7 +27,7 @@ Use it only for content you own, content you are allowed to download, or content
 - MP3 audio downloads.
 - MP4 video downloads in the highest available quality.
 - Automatic input detection for single links, multiple links, YouTube playlists, YouTube channels and `.txt` files.
-- YouTube channel preflight with item count, estimated size and confirmation.
+- YouTube playlist/channel preflight with item count, estimated size and confirmation.
 - Instagram, TikTok and Facebook photo downloads through `gallery-dl`.
 - Spotify mode through `spotDL` metadata matching with YouTube/YouTube Music.
 - Authorized OnlyFans workflows through direct media links or optional OF-Scraper integration.
@@ -58,7 +58,9 @@ The installer:
 - creates a desktop shortcut named `Video Downloader`,
 - downloads app files from GitHub releases,
 - checks whether components are already installed before downloading them,
-- installs or verifies Python, pip, FFmpeg, `yt-dlp`, `gallery-dl`, `spotDL` and `OF-Scraper`,
+- installs or verifies Python, pip, Microsoft C++ Build Tools, FFmpeg, `yt-dlp`, `gallery-dl`, `spotDL` and `OF-Scraper`,
+- shows step progress and overall progress, including already-installed and update-check statuses,
+- retries failed Python package installs with fallback methods for difficult dependencies,
 - hides technical logs by default when `DEBUG=0`.
 
 ## Run
@@ -82,6 +84,7 @@ youtube_downloader.py
 zainstaluj_wszystko.bat
 install.ps1
 uruchom_downloader.bat
+update.bat
 README.md
 CHANGELOG.md
 LICENSE
@@ -211,7 +214,8 @@ Type:
 update
 ```
 
-The app checks the latest GitHub release, compares it with local `APP_VERSION`, and downloads newer app files when available.
+The app checks the latest GitHub release and compares it with local `APP_VERSION`.
+When a newer release is available, the app asks for confirmation, starts `update.bat`, and closes so the updater can overwrite existing application files safely.
 
 ## Notes
 

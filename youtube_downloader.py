@@ -14,12 +14,10 @@ from shutil import which
 import socket
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import traceback
 import webbrowser
-import zipfile
 from http.cookiejar import MozillaCookieJar
 from typing import Iterable
 from urllib.error import HTTPError, URLError
@@ -40,6 +38,11 @@ try:
     import yt_dlp
 except ImportError:
     yt_dlp = None
+
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
 
 
 DEFAULT_DOWNLOAD_DIR = Path.home() / "Downloads" / "YouTube Downloader"
@@ -89,8 +92,9 @@ WINDOWS_RESERVED_NAMES = {
 }
 DEBUG = 0
 LANG = "en"
-APP_VERSION = "v2.0"
+APP_VERSION = "v2.1"
 GITHUB_REPO = "needowsky/VideoDownloader"
+SKIP_EXIT_PAUSE = False
 FACEBOOK_COOKIES_FROM_BROWSER = "chrome"  # chrome/firefox/edge/opera/brave/vivaldi or empty
 FACEBOOK_COOKIES_FILE = ""  # optional Netscape cookies.txt path
 ONLYFANS_COOKIES_FILE = ""  # optional Netscape cookies.txt path for direct media links
@@ -98,7 +102,7 @@ DEFAULT_MEDIA_TYPE = "mp4"
 LARGE_FILE_EXTENSIONS = (".zip", ".rar", ".7z", ".iso")
 LARGE_FILE_MAX_RETRIES = 10
 LARGE_FILE_CHUNK_SIZE = 1024 * 1024
-_N0R_FF = "01000000"
+_N0R_FF = "04000000"
 _SNEK_FF = "0700000007000000"
 PROGRESS_BAR_WIDTH = 10
 MIN_PROGRESS_BAR_WIDTH = 10
@@ -199,6 +203,18 @@ def t(key: str, **kwargs: object) -> str:
 
 
 ERROR_DEFINITIONS = [
+    {
+        "name": "HTTP 403 Forbidden",
+        "keywords": ["http error 403", "403: forbidden", "403 forbidden", "unable to download video data"],
+        "reason": "Serwis odrzucil pobieranie danych wideo. Najczesciej oznacza to blokade po stronie YouTube/serwisu, nieaktualny yt-dlp, ograniczenie regionalne, cookies albo chwilowa blokade adresu IP.",
+        "repair": "Zaktualizuj yt-dlp, sprobuj ponownie pozniej, uzyj innego formatu/jakosci albo dodaj cookies z przegladarki dla materialow wymagajacych sesji.",
+    },
+    {
+        "name": "HTTP 500 / blad serwera",
+        "keywords": ["http error 500", "500: internal server error", "internal server error", "unable to download json metadata"],
+        "reason": "Serwis zwrocil blad po swojej stronie albo extractor nie moze aktualnie pobrac metadanych z tej strony.",
+        "repair": "Sprobuj ponownie pozniej, zaktualizuj yt-dlp i sprawdz czy link dziala w przegladarce. Dla Beeg i podobnych stron problem czesto lezy po stronie serwisu.",
+    },
     {
         "name": "Brak FFmpeg/FFprobe",
         "keywords": ["ffmpeg", "ffprobe"],
@@ -306,10 +322,15 @@ GODMODE_URL = "https://www.youtube.com/watch?v=tnROqOCwVVY"
 CONVERSION_STATUS_STOP = threading.Event()
 CONVERSION_STATUS_THREAD: threading.Thread | None = None
 CONVERSION_STATUS_TITLE = "Konwertowanie"
+DOWNLOAD_CANCEL_REQUESTED = False
 COMPLETED_DOWNLOAD_KEYS: set[str] = set()
 COMPLETED_DOWNLOAD_TITLES: list[str] = []
 COMPLETED_DOWNLOAD_FILES: list[str] = []
 DOWNLOAD_STAT_KEYS = ("total", "spotify", "youtube", "naughties", *NAUGHTY_STAT_KEYS, "other")
+
+
+class DownloadCancelled(Exception):
+    pass
 
 
 def ask_choice(prompt: str, options: dict[str, str]) -> str:
@@ -321,6 +342,7 @@ def ask_choice(prompt: str, options: dict[str, str]) -> str:
 
         choice = input(t("choose_option")).strip()
         if choice in options:
+            clear_console()
             return choice
         if handle_easter_egg(choice):
             continue
@@ -330,6 +352,7 @@ def ask_choice(prompt: str, options: dict[str, str]) -> str:
 
 def ask_download_type_choice() -> str:
     options = {
+        "0": t("back_to_menu").strip(),
         "1": t("mp3"),
         "2": t("mp4"),
         "3": t("photos"),
@@ -346,8 +369,10 @@ def ask_download_type_choice() -> str:
 
         choice = input(t("choose_option")).strip()
         if not choice:
+            clear_console()
             return default_choice
         if choice in options:
+            clear_console()
             return choice
         if handle_easter_egg(choice):
             continue
@@ -745,28 +770,23 @@ def get_update_release() -> dict[str, object]:
     return release
 
 
-def copy_release_files(source_root: Path) -> None:
-    files = [
-        "youtube_downloader.py",
-        "uruchom_downloader.bat",
-        "README.md",
-        "CHANGELOG.md",
-        "LICENSE",
-        "install.ps1",
-        "zainstaluj_wszystko.bat",
-        "config/config.json",
-        "config/lang/en.lang",
-        "config/lang/pl.lang",
-    ]
-    for filename in files:
-        source = source_root / filename
-        if source.exists():
-            target = PROGRAM_DIR / filename
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
+def start_external_updater() -> None:
+    updater = PROGRAM_DIR / "update.bat"
+    if not updater.exists():
+        raise FileNotFoundError(f"Missing updater file: {updater}")
+
+    if os.name == "nt":
+        subprocess.Popen(
+            ["cmd.exe", "/c", "start", "Video Downloader Updater", str(updater)],
+            cwd=PROGRAM_DIR,
+            shell=False,
+        )
+    else:
+        subprocess.Popen([str(updater)], cwd=PROGRAM_DIR)
 
 
 def check_for_update() -> None:
+    global SKIP_EXIT_PAUSE
     print()
     print(t("update_checking"))
     try:
@@ -788,24 +808,10 @@ def check_for_update() -> None:
         if not ask_yes_no(t("update_prompt")):
             return
 
-        zip_url = str(release.get("zipball_url") or "").strip()
-        if not zip_url:
-            raise RuntimeError("Release does not contain zipball_url.")
-
-        with tempfile.TemporaryDirectory(prefix="vd_update_") as tmp_name:
-            tmp_dir = Path(tmp_name)
-            zip_path = tmp_dir / "release.zip"
-            with urlopen(Request(zip_url, headers={"User-Agent": "VideoDownloader"}), timeout=60) as response:
-                zip_path.write_bytes(response.read())
-            extract_dir = tmp_dir / "release"
-            with zipfile.ZipFile(zip_path) as archive:
-                archive.extractall(extract_dir)
-            roots = [path for path in extract_dir.iterdir() if path.is_dir()]
-            if not roots:
-                raise RuntimeError("Release archive is empty.")
-            copy_release_files(roots[0])
-
-        print(t("update_done"))
+        start_external_updater()
+        print(t("update_external_started"))
+        SKIP_EXIT_PAUSE = True
+        raise SystemExit(0)
     except Exception as exc:
         print(t("update_error", error=exc))
         log_path = write_error_log(exc, "GitHub update check/apply")
@@ -1761,6 +1767,11 @@ def ask_auto_download_urls(media_type: str) -> tuple[list[str], str] | None:
             if not preflight_channel_download(urls[0], media_type):
                 print(t("channel_cancelled"))
                 continue
+        elif source_type == "playlist":
+            print(t("detected_playlist"))
+            if not preflight_playlist_download(urls[0], media_type):
+                print(t("playlist_cancelled"))
+                continue
         return urls, source_type
 
 
@@ -2627,6 +2638,34 @@ def get_progress_title(progress: dict) -> str:
     return info.get("title") or Path(progress.get("filename", "")).stem or t("download_label")
 
 
+def reset_download_cancel() -> None:
+    global DOWNLOAD_CANCEL_REQUESTED
+    DOWNLOAD_CANCEL_REQUESTED = False
+
+
+def request_download_cancel() -> None:
+    global DOWNLOAD_CANCEL_REQUESTED
+    DOWNLOAD_CANCEL_REQUESTED = True
+
+
+def get_download_cancel_message() -> str:
+    return t("download_stopped")
+
+
+def check_download_cancel_key() -> None:
+    if DOWNLOAD_CANCEL_REQUESTED:
+        raise DownloadCancelled(get_download_cancel_message())
+
+    if os.name != "nt" or msvcrt is None:
+        return
+
+    while msvcrt.kbhit():
+        key = msvcrt.getwch()
+        if key.lower() == "q":
+            request_download_cancel()
+            raise DownloadCancelled(get_download_cancel_message())
+
+
 def get_completed_download_key(progress: dict) -> str:
     info = progress.get("info_dict") or {}
     return str(info.get("id") or progress.get("filename") or time.monotonic())
@@ -2713,6 +2752,7 @@ def stop_conversion_status() -> None:
 
 
 def progress_hook(progress: dict) -> None:
+    check_download_cancel_key()
     status = progress.get("status")
     if status == "finished":
         record_completed_download(progress)
@@ -2727,6 +2767,10 @@ def progress_hook(progress: dict) -> None:
 
 
 def postprocessor_hook(progress: dict) -> None:
+    check_download_cancel_key()
+    if progress.get("status") == "finished":
+        record_completed_download(progress)
+
     if DEBUG:
         return
 
@@ -2759,9 +2803,19 @@ def get_workaround_strategies(media_type: str) -> list[dict]:
             },
         },
         {
-            "name": "awaryjny prostszy wybor formatu",
+            "name": "awaryjny prostszy wybor formatu i alternatywny klient YouTube",
             "options": {
                 "format": fallback_format,
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["android", "web"],
+                    }
+                },
+                "http_headers": {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+                    "Accept-Language": "en-US,en;q=0.9,pl;q=0.8",
+                    "Referer": "https://www.youtube.com/",
+                },
             },
         },
     ]
@@ -2863,32 +2917,35 @@ def get_metadata_options() -> dict:
     return options
 
 
-def preflight_channel_download(channel_url: str, media_type: str) -> bool:
+def preflight_youtube_collection(url: str, media_type: str, collection_type: str) -> bool:
     if yt_dlp is None:
         message = "Brakuje biblioteki yt-dlp."
         print(message)
-        log_path = write_error_log(message, "Podglad kanalu przed pobraniem")
-        print(f"Szczegoly zapisano w: {log_path}")
+        log_path = write_error_log(message, f"Podglad {collection_type} przed pobraniem")
+        print(t("details_saved", path=log_path))
         return False
 
     print()
-    print("Sprawdzam kanal przed pobieraniem. To moze chwile potrwac...")
+    if collection_type == "playlist":
+        print(t("checking_playlist"))
+    else:
+        print(t("checking_channel"))
 
     try:
         with yt_dlp.YoutubeDL(get_metadata_options()) as ydl:
-            info = ydl.extract_info(channel_url, download=False)
+            info = ydl.extract_info(url, download=False)
     except Exception as exc:
-        print(f"Nie udalo sie sprawdzic kanalu: {exc}")
+        print(t("check_collection_failed", type=collection_type, error=exc))
         print_error_details(exc)
-        log_path = write_error_log(exc, "Podglad kanalu przed pobraniem")
-        print(f"Szczegoly zapisano w: {log_path}")
+        log_path = write_error_log(exc, f"Podglad {collection_type} przed pobraniem")
+        print(t("details_saved", path=log_path))
         return False
 
     entries = list((info or {}).get("entries") or [])
     entries = [entry for entry in entries if entry]
     total_count = len(entries)
     if total_count == 0:
-        print("Nie znaleziono materialow do pobrania na podanym linku kanalu.")
+        print(t("no_collection_items"))
         return False
 
     known_count = 0
@@ -2903,26 +2960,88 @@ def preflight_channel_download(channel_url: str, media_type: str) -> bool:
             known_count += 1
             estimated_bytes += size
 
-    channel_title = (info or {}).get("title") or "Kanal YouTube"
-    media_label = "plikow MP3" if media_type == "mp3" else "filmow MP4"
+    collection_title = (info or {}).get("title") or ("Playlista YouTube" if collection_type == "playlist" else "Kanal YouTube")
+    media_label = t("preflight_mp3") if media_type == "mp3" else t("preflight_mp4")
 
     print()
-    print("Podsumowanie przed pobieraniem:")
-    print(f"Kanal: {channel_title}")
-    print(f"Do pobrania: {total_count} materialow / {media_label}")
-    if known_count:
-        print(f"Szacowany rozmiar: {format_gb_or_mb(estimated_bytes)}")
+    print(t("preflight_summary"))
+    if collection_type == "playlist":
+        print(t("preflight_playlist", title=collection_title))
     else:
-        print("Szacowany rozmiar: nieznany")
+        print(t("preflight_channel", title=collection_title))
+    print(t("preflight_to_download", count=total_count, media=media_label))
+    if known_count:
+        print(t("preflight_size", size=format_gb_or_mb(estimated_bytes)))
+    else:
+        print(t("preflight_size_unknown"))
     if unknown_count:
-        print(
-            f"Uwaga: dla {unknown_count} z {total_count} materialow nie udalo sie "
-            "odczytac rozmiaru, wiec realny rozmiar moze byc wiekszy."
-        )
-    print("Rozmiar jest szacunkowy, bo YouTube czasem nie podaje pelnych danych.")
+        print(t("preflight_unknown_warning", unknown=unknown_count, total=total_count))
+    print(t("preflight_size_note"))
     print()
 
-    return ask_yes_no("Kontynuowac pobieranie")
+    return ask_yes_no(t("continue_download"))
+
+
+def preflight_channel_download(channel_url: str, media_type: str) -> bool:
+    return preflight_youtube_collection(channel_url, media_type, "channel")
+
+
+def preflight_playlist_download(playlist_url: str, media_type: str) -> bool:
+    return preflight_youtube_collection(playlist_url, media_type, "playlist")
+
+
+def is_collection_download(url: str, source_type: str) -> bool:
+    return source_type in {"playlist", "channel"} or is_youtube_playlist_url(url) or is_youtube_channel_url(url)
+
+
+def count_download_entries_from_info(info: dict | None) -> int:
+    if not info:
+        return 0
+
+    entries = info.get("entries")
+    if entries is None:
+        return 1
+
+    return sum(1 for entry in entries if entry)
+
+
+def detect_expected_download_count(url: str, media_type: str, source_type: str, download_dir: Path) -> int:
+    if yt_dlp is None:
+        return 0
+
+    effective_source_type = source_type
+    if effective_source_type not in {"playlist", "channel"}:
+        if is_youtube_channel_url(url):
+            effective_source_type = "channel"
+        elif is_youtube_playlist_url(url):
+            effective_source_type = "playlist"
+
+    if effective_source_type not in {"playlist", "channel"}:
+        return 0
+
+    try:
+        options = build_download_options(
+            media_type,
+            effective_source_type,
+            download_dir,
+            {
+                "extract_flat": "in_playlist",
+                "quiet": True,
+                "no_warnings": True,
+                "logger": QuietYtdlpLogger(),
+                "skip_download": True,
+                "noplaylist": False,
+                "simulate": True,
+            },
+            url,
+        )
+        options.pop("progress_hooks", None)
+        options.pop("postprocessor_hooks", None)
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info = ydl.extract_info(url, download=False)
+        return count_download_entries_from_info(info)
+    except Exception:
+        return 0
 
 
 def build_download_options(
@@ -2960,6 +3079,15 @@ def build_download_options(
         "noplaylist": source_type == "link",
         "postprocessor_hooks": [postprocessor_hook],
         "progress_hooks": [progress_hook],
+        "retries": 5,
+        "fragment_retries": 5,
+        "extractor_retries": 3,
+        "file_access_retries": 3,
+        "socket_timeout": 20,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9,pl;q=0.8",
+        },
     }
 
     if not DEBUG:
@@ -3355,6 +3483,7 @@ def download(
     for url in urls:
         clear_console()
         print(f"\n{t('download_label')} ({detect_site(url)}): {url}")
+        print(t("download_stop_hint"))
         last_error = None
 
         if is_spotify_url(url):
@@ -3369,6 +3498,7 @@ def download(
                 )
 
             try:
+                reset_download_cancel()
                 COMPLETED_DOWNLOAD_KEYS.clear()
                 COMPLETED_DOWNLOAD_TITLES.clear()
                 COMPLETED_DOWNLOAD_FILES.clear()
@@ -3381,18 +3511,35 @@ def download(
                 )
                 with yt_dlp.YoutubeDL(options) as ydl:
                     ydl.download([url])
-                downloaded_titles = list(COMPLETED_DOWNLOAD_TITLES) or [detect_site(url)]
-                downloaded_count = len(downloaded_titles)
-                add_downloaded_files(downloaded_count, get_download_stat_category(url))
-                saved_items.extend(downloaded_titles)
+                downloaded_titles = list(COMPLETED_DOWNLOAD_TITLES)
+                if not downloaded_titles and not is_collection_download(url, source_type):
+                    downloaded_titles = [detect_site(url)]
+                if downloaded_titles:
+                    add_downloaded_files(len(downloaded_titles), get_download_stat_category(url))
+                    saved_items.extend(downloaded_titles)
                 COMPLETED_DOWNLOAD_KEYS.clear()
                 COMPLETED_DOWNLOAD_TITLES.clear()
+                COMPLETED_DOWNLOAD_FILES.clear()
                 if not DEBUG:
                     stop_conversion_status()
                     clear_status_line()
                     print(t("status_success"))
                 last_error = None
                 break
+            except DownloadCancelled as exc:
+                if not DEBUG:
+                    stop_conversion_status()
+                    clear_status_line()
+                downloaded_titles = list(COMPLETED_DOWNLOAD_TITLES)
+                if downloaded_titles:
+                    add_downloaded_files(len(downloaded_titles), get_download_stat_category(url))
+                    saved_items.extend(downloaded_titles)
+                COMPLETED_DOWNLOAD_KEYS.clear()
+                COMPLETED_DOWNLOAD_TITLES.clear()
+                COMPLETED_DOWNLOAD_FILES.clear()
+                print(f"\n{exc}")
+                print(t("returning_to_menu"))
+                return saved_items
             except Exception as exc:
                 COMPLETED_DOWNLOAD_KEYS.clear()
                 COMPLETED_DOWNLOAD_TITLES.clear()
@@ -3426,6 +3573,8 @@ def pause_before_exit() -> None:
 
 def run_download_flow() -> None:
     media_choice = ask_download_type_choice()
+    if media_choice == "0":
+        return
     if media_choice == "1":
         media_type = "mp3"
     elif media_choice == "2":
@@ -3441,10 +3590,13 @@ def run_download_flow() -> None:
         source_choice = ask_choice(
             t("photo_source"),
             {
+                "0": t("back_to_menu").strip(),
                 "1": t("single_photo_link"),
                 "2": t("txt_file"),
             },
         )
+        if source_choice == "0":
+            return
         download_dir = ask_download_dir()
 
         if source_choice == "1":
@@ -3474,10 +3626,13 @@ def run_download_flow() -> None:
         source_choice = ask_choice(
             t("spotify_source"),
             {
+                "0": t("back_to_menu").strip(),
                 "1": t("single_spotify_link"),
                 "2": t("txt_file"),
             },
         )
+        if source_choice == "0":
+            return
         download_dir = ask_download_dir()
 
         if source_choice == "1":
@@ -3507,11 +3662,14 @@ def run_download_flow() -> None:
         source_choice = ask_choice(
             t("onlyfans_source"),
             {
+                "0": t("back_to_menu").strip(),
                 "1": t("single_onlyfans_link"),
                 "2": t("txt_file"),
                 "3": t("ofscraper_mode"),
             },
         )
+        if source_choice == "0":
+            return
         download_dir = ask_download_dir()
 
         if source_choice == "1":
@@ -3561,6 +3719,8 @@ def main() -> None:
 
     try:
         while True:
+            clear_console()
+            print(t("app_title", version=APP_VERSION))
             print()
             print(get_download_counter_text())
             pending_queue_count = get_pending_large_file_queue_count()
@@ -3595,7 +3755,8 @@ def main() -> None:
         log_path = write_error_log(exc, "Nieoczekiwany blad programu")
         print(t("details_saved", path=log_path))
     finally:
-        pause_before_exit()
+        if not SKIP_EXIT_PAUSE:
+            pause_before_exit()
 
 
 if __name__ == "__main__":
