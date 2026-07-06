@@ -1,10 +1,11 @@
-Video Downloader Source-Available License
+Video Downloader Custom Source-Available License
 
 Copyright (c) 2026 needowsky
+Author: needowsky
 All rights reserved.
 
-This software and its source code are made available by needowsky for
-personal use, inspection, learning, and private modification only.
+This software and its source code are made available by needowsky only for
+personal use, internal use, inspection, learning, and private modification.
 
 Permission is granted to any person obtaining a copy of this software to:
 
@@ -13,30 +14,33 @@ Permission is granted to any person obtaining a copy of this software to:
 3. modify the software for personal or internal use;
 4. keep private modified copies.
 
-The following actions are not permitted without prior written permission
-from needowsky:
+The following actions are prohibited unless needowsky gives prior written
+permission:
 
-1. publishing, uploading, sharing, distributing, or redistributing the
-   software, source code, modified versions, compiled builds, installers,
-   forks, mirrors, or derivative works;
-2. sublicensing, selling, renting, leasing, or otherwise commercially
-   exploiting the software or modified versions;
-3. removing, hiding, replacing, or altering copyright notices, author
+1. publishing, uploading, sharing, distributing, redistributing, or making
+   publicly available the software, source code, modified versions, compiled
+   builds, installers, forks, mirrors, packages, or derivative works;
+2. creating or maintaining public forks, mirrors, reposts, reuploads, or
+   public derivative releases;
+3. sublicensing, selling, renting, leasing, or otherwise commercially
+   exploiting the software, source code, or modified versions;
+4. removing, hiding, replacing, or altering copyright notices, author
    information, license text, project identity, or attribution;
-4. claiming authorship or presenting the software or modified versions as
-   created by anyone other than needowsky;
-5. using the project name, repository, branding, or author identity in a way
+5. changing the author name, claiming authorship, or presenting the software
+   or modified versions as created by anyone other than needowsky;
+6. using the project name, repository, branding, or author identity in a way
    that suggests endorsement, official status, or transfer of authorship.
 
-Any public release, fork, mirror, repost, package, installer, or derivative
-publication requires explicit prior written permission from needowsky.
+Any public release, fork, mirror, repost, package, installer, compiled build,
+or derivative publication requires explicit prior written permission from
+needowsky.
 
-If permission is granted for publication or redistribution, this license text
-and the copyright notice must remain included unless needowsky gives written
-permission otherwise.
+If permission is granted for publication or redistribution, this license text,
+the copyright notice, and the author attribution must remain included unless
+needowsky gives written permission otherwise.
 
 This software is provided "as is", without warranty of any kind, express or
 implied, including but not limited to warranties of merchantability, fitness
-for a particular purpose, and non-infringement. In no event shall the author
-be liable for any claim, damages, or other liability arising from use of the
+for a particular purpose, and non-infringement. In no event shall needowsky be
+liable for any claim, damages, or other liability arising from use of the
 software.
