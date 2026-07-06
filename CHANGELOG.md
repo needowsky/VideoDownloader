@@ -69,7 +69,7 @@ Major project refresh focused on installation, configuration, automatic detectio
 - External language files in `config/lang/*.lang`.
 - Language file detection and syntax validation before use.
 - English and Polish interface files.
-- MIT license file.
+- Custom source-available license file.
 
 ### Changed
 

@@ -240,4 +240,4 @@ When a newer release is available, the app asks for confirmation, starts `update
 
 ## License
 
-MIT License. See `LICENSE`.
+Source-available custom license. Personal use, inspection and private modification are allowed. Publishing, redistribution, public forks, modified public releases, author changes or sublicensing require prior written permission from needowsky. See `LICENSE`.
