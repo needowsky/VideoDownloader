@@ -104,6 +104,8 @@ if /i "%GITHUB_UPDATES%"=="1" (
 
     )
 
+    call :DownloadAppAssets
+
     call :ApplyProgramLanguage
 
     call :StepOk 1
@@ -398,6 +400,8 @@ if not defined FFMPEG_FOUND (
 
 )
 
+call :GrantAppReadPermissions
+
 call :StepOk 10
 
 call :StepStart 11 "Shortcuts"
@@ -413,6 +417,8 @@ if errorlevel 1 (
     exit /b 1
 
 )
+
+call :SetShortcutIcons
 
 call :StepOk 11
 
@@ -482,7 +488,7 @@ set "ELEVATE_VBS=%TEMP%\vd_elevate_installer.vbs"
 
 cscript //nologo "%ELEVATE_VBS%" >nul 2>nul
 
-exit /b 1
+exit /b 0
 
 :DownloadProgramFiles
 
@@ -514,11 +520,11 @@ exit /b 1
 
 if "%DEBUG%"=="1" (
 
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; function Get-Numbers($v){ $n=@([regex]::Matches([string]$v,'\d+') | ForEach-Object {[int]$_.Value}); if($n.Count -eq 0){ return @(0) }; return $n }; function Compare-Version($a,$b){ $av=Get-Numbers $a; $bv=Get-Numbers $b; $max=[Math]::Max($av.Count,$bv.Count); for($i=0;$i -lt $max;$i++){ $ai=0; $bi=0; if($i -lt $av.Count){ $ai=$av[$i] }; if($i -lt $bv.Count){ $bi=$bv[$i] }; if($ai -gt $bi){ return 1 }; if($ai -lt $bi){ return -1 } }; return 0 }; $repo='%GITHUB_REPO%'; $api='https://api.github.com/repos/' + $repo + '/releases/latest'; $release=Invoke-RestMethod -Uri $api -Headers @{'User-Agent'='VideoDownloaderInstaller'}; $releaseName=([string]$release.name).Trim(); $releaseTag=([string]$release.tag_name).Trim(); if($releaseName -match '\d'){ $latest=$releaseName } else { $latest=$releaseTag }; if(-not $latest){ $latest=$releaseName }; if(-not $latest){ throw 'No release version in latest release' }; $current=''; if(Test-Path 'youtube_downloader.py'){ $line=Select-String -Path 'youtube_downloader.py' -Pattern 'APP_VERSION' | Select-Object -First 1; if($line){ $m=[regex]::Match($line.Line,'v?\d+(\.\d+)*'); if($m.Success){ $current=$m.Value.Trim() } } }; if($current -and ((Compare-Version $latest $current) -le 0)){ Write-Host ('Current version ' + $current + ' is up to date. Latest: ' + $latest); exit 0 }; Write-Host ('Installing app version ' + $latest + ($(if($current){ ' over ' + $current } else { '' }))); $zipUrl=$release.zipball_url; if(-not $zipUrl){ throw 'No zipball_url in latest release' }; $zip=Join-Path $env:TEMP 'vd_latest_release.zip'; $tmp=Join-Path $env:TEMP ('vd_release_'+[guid]::NewGuid().ToString()); Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -Headers @{'User-Agent'='VideoDownloaderInstaller'} -OutFile $zip; Expand-Archive -Force -Path $zip -DestinationPath $tmp; $root=Get-ChildItem -Path $tmp -Directory | Select-Object -First 1; if(-not $root){ throw 'Release archive is empty' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat'); foreach($file in $files){ $src=Join-Path $root.FullName $file; if(-not (Test-Path $src)){ throw ('Missing file in release: ' + $file) }; $dest=$file; $destDir=Split-Path -Parent $dest; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Copy-Item -Force -LiteralPath $src -Destination $dest }; exit 0"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; function Get-Numbers($v){ $n=@([regex]::Matches([string]$v,'\d+') | ForEach-Object {[int]$_.Value}); if($n.Count -eq 0){ return @(0) }; return $n }; function Compare-Version($a,$b){ $av=Get-Numbers $a; $bv=Get-Numbers $b; $max=[Math]::Max($av.Count,$bv.Count); for($i=0;$i -lt $max;$i++){ $ai=0; $bi=0; if($i -lt $av.Count){ $ai=$av[$i] }; if($i -lt $bv.Count){ $bi=$bv[$i] }; if($ai -gt $bi){ return 1 }; if($ai -lt $bi){ return -1 } }; return 0 }; $repo='%GITHUB_REPO%'; $api='https://api.github.com/repos/' + $repo + '/releases/latest'; $release=Invoke-RestMethod -Uri $api -Headers @{'User-Agent'='VideoDownloaderInstaller'}; $releaseName=([string]$release.name).Trim(); $releaseTag=([string]$release.tag_name).Trim(); if($releaseName -match '\d'){ $latest=$releaseName } else { $latest=$releaseTag }; if(-not $latest){ $latest=$releaseName }; if(-not $latest){ throw 'No release version in latest release' }; $current=''; if(Test-Path 'youtube_downloader.py'){ $line=Select-String -Path 'youtube_downloader.py' -Pattern 'APP_VERSION' | Select-Object -First 1; if($line){ $m=[regex]::Match($line.Line,'v?\d+(\.\d+)*'); if($m.Success){ $current=$m.Value.Trim() } } }; if($current -and ((Compare-Version $latest $current) -le 0)){ Write-Host ('Current version ' + $current + ' is up to date. Latest: ' + $latest); exit 0 }; Write-Host ('Installing app version ' + $latest + ($(if($current){ ' over ' + $current } else { '' }))); $zipUrl=$release.zipball_url; if(-not $zipUrl){ throw 'No zipball_url in latest release' }; $zip=Join-Path $env:TEMP 'vd_latest_release.zip'; $tmp=Join-Path $env:TEMP ('vd_release_'+[guid]::NewGuid().ToString()); Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -Headers @{'User-Agent'='VideoDownloaderInstaller'} -OutFile $zip; Expand-Archive -Force -Path $zip -DestinationPath $tmp; $root=Get-ChildItem -Path $tmp -Directory | Select-Object -First 1; if(-not $root){ throw 'Release archive is empty' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat','config/config.json','config/lang/en.lang','config/lang/pl.lang','assets/video_downloader.ico','assets/video_downloader.png'); foreach($file in $files){ $src=Join-Path $root.FullName $file; if(Test-Path $src){ $dest=$file; $destDir=Split-Path -Parent $dest; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Copy-Item -Force -LiteralPath $src -Destination $dest } else { Write-Host ('Skipped missing file: ' + $file) } }; exit 0"
 
 ) else (
 
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; function Get-Numbers($v){ $n=@([regex]::Matches([string]$v,'\d+') | ForEach-Object {[int]$_.Value}); if($n.Count -eq 0){ return @(0) }; return $n }; function Compare-Version($a,$b){ $av=Get-Numbers $a; $bv=Get-Numbers $b; $max=[Math]::Max($av.Count,$bv.Count); for($i=0;$i -lt $max;$i++){ $ai=0; $bi=0; if($i -lt $av.Count){ $ai=$av[$i] }; if($i -lt $bv.Count){ $bi=$bv[$i] }; if($ai -gt $bi){ return 1 }; if($ai -lt $bi){ return -1 } }; return 0 }; $repo='%GITHUB_REPO%'; $api='https://api.github.com/repos/' + $repo + '/releases/latest'; $release=Invoke-RestMethod -Uri $api -Headers @{'User-Agent'='VideoDownloaderInstaller'}; $releaseName=([string]$release.name).Trim(); $releaseTag=([string]$release.tag_name).Trim(); if($releaseName -match '\d'){ $latest=$releaseName } else { $latest=$releaseTag }; if(-not $latest){ $latest=$releaseName }; if(-not $latest){ throw 'No release version in latest release' }; $current=''; if(Test-Path 'youtube_downloader.py'){ $line=Select-String -Path 'youtube_downloader.py' -Pattern 'APP_VERSION' | Select-Object -First 1; if($line){ $m=[regex]::Match($line.Line,'v?\d+(\.\d+)*'); if($m.Success){ $current=$m.Value.Trim() } } }; if($current -and ((Compare-Version $latest $current) -le 0)){ Write-Output ('Current version ' + $current + ' is up to date. Latest: ' + $latest); exit 0 }; Write-Output ('Installing app version ' + $latest + ($(if($current){ ' over ' + $current } else { '' }))); $zipUrl=$release.zipball_url; if(-not $zipUrl){ throw 'No zipball_url in latest release' }; $zip=Join-Path $env:TEMP 'vd_latest_release.zip'; $tmp=Join-Path $env:TEMP ('vd_release_'+[guid]::NewGuid().ToString()); Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -Headers @{'User-Agent'='VideoDownloaderInstaller'} -OutFile $zip; Expand-Archive -Force -Path $zip -DestinationPath $tmp; $root=Get-ChildItem -Path $tmp -Directory | Select-Object -First 1; if(-not $root){ throw 'Release archive is empty' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat'); foreach($file in $files){ $src=Join-Path $root.FullName $file; if(-not (Test-Path $src)){ throw ('Missing file in release: ' + $file) }; $dest=$file; $destDir=Split-Path -Parent $dest; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Copy-Item -Force -LiteralPath $src -Destination $dest }; exit 0" >> "%INSTALL_LOG%" 2>&1
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; function Get-Numbers($v){ $n=@([regex]::Matches([string]$v,'\d+') | ForEach-Object {[int]$_.Value}); if($n.Count -eq 0){ return @(0) }; return $n }; function Compare-Version($a,$b){ $av=Get-Numbers $a; $bv=Get-Numbers $b; $max=[Math]::Max($av.Count,$bv.Count); for($i=0;$i -lt $max;$i++){ $ai=0; $bi=0; if($i -lt $av.Count){ $ai=$av[$i] }; if($i -lt $bv.Count){ $bi=$bv[$i] }; if($ai -gt $bi){ return 1 }; if($ai -lt $bi){ return -1 } }; return 0 }; $repo='%GITHUB_REPO%'; $api='https://api.github.com/repos/' + $repo + '/releases/latest'; $release=Invoke-RestMethod -Uri $api -Headers @{'User-Agent'='VideoDownloaderInstaller'}; $releaseName=([string]$release.name).Trim(); $releaseTag=([string]$release.tag_name).Trim(); if($releaseName -match '\d'){ $latest=$releaseName } else { $latest=$releaseTag }; if(-not $latest){ $latest=$releaseName }; if(-not $latest){ throw 'No release version in latest release' }; $current=''; if(Test-Path 'youtube_downloader.py'){ $line=Select-String -Path 'youtube_downloader.py' -Pattern 'APP_VERSION' | Select-Object -First 1; if($line){ $m=[regex]::Match($line.Line,'v?\d+(\.\d+)*'); if($m.Success){ $current=$m.Value.Trim() } } }; if($current -and ((Compare-Version $latest $current) -le 0)){ Write-Output ('Current version ' + $current + ' is up to date. Latest: ' + $latest); exit 0 }; Write-Output ('Installing app version ' + $latest + ($(if($current){ ' over ' + $current } else { '' }))); $zipUrl=$release.zipball_url; if(-not $zipUrl){ throw 'No zipball_url in latest release' }; $zip=Join-Path $env:TEMP 'vd_latest_release.zip'; $tmp=Join-Path $env:TEMP ('vd_release_'+[guid]::NewGuid().ToString()); Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -Headers @{'User-Agent'='VideoDownloaderInstaller'} -OutFile $zip; Expand-Archive -Force -Path $zip -DestinationPath $tmp; $root=Get-ChildItem -Path $tmp -Directory | Select-Object -First 1; if(-not $root){ throw 'Release archive is empty' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat','config/config.json','config/lang/en.lang','config/lang/pl.lang','assets/video_downloader.ico','assets/video_downloader.png'); foreach($file in $files){ $src=Join-Path $root.FullName $file; if(Test-Path $src){ $dest=$file; $destDir=Split-Path -Parent $dest; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Copy-Item -Force -LiteralPath $src -Destination $dest } }; exit 0" >> "%INSTALL_LOG%" 2>&1
 
 )
 
@@ -530,11 +536,11 @@ set "DOWNLOAD_BRANCH=%~1"
 
 if "%DEBUG%"=="1" (
 
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $base='https://raw.githubusercontent.com/%GITHUB_REPO%/%DOWNLOAD_BRANCH%'; $files=@('youtube_downloader.py','uruchom_downloader.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat'); foreach($file in $files){ $url=($base.TrimEnd('/') + '/' + $file); $destDir=Split-Path -Parent $file; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Write-Host ('Downloading ' + $file); Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $file }; exit 0"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $repo='%GITHUB_REPO%'; $branch='%DOWNLOAD_BRANCH%'; $zip=Join-Path $env:TEMP ('vd_branch_' + [guid]::NewGuid().ToString('N') + '.zip'); $tmp=Join-Path $env:TEMP ('vd_branch_' + [guid]::NewGuid().ToString('N')); $url='https://codeload.github.com/' + $repo + '/zip/refs/heads/' + $branch; Write-Host ('Downloading repository zip from ' + $branch); Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='VideoDownloaderInstaller'} -Uri $url -OutFile $zip; Expand-Archive -Force -Path $zip -DestinationPath $tmp; $root=Get-ChildItem -Path $tmp -Directory | Select-Object -First 1; if(-not $root){ throw 'Branch archive is empty' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat','config/config.json','config/lang/en.lang','config/lang/pl.lang','assets/video_downloader.ico','assets/video_downloader.png'); foreach($file in $files){ $src=Join-Path $root.FullName $file; if(Test-Path $src){ $dest=$file; $destDir=Split-Path -Parent $dest; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Copy-Item -Force -LiteralPath $src -Destination $dest; Write-Host ('Updated ' + $file) } else { Write-Host ('Skipped missing file: ' + $file) } }; exit 0"
 
 ) else (
 
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $base='https://raw.githubusercontent.com/%GITHUB_REPO%/%DOWNLOAD_BRANCH%'; $files=@('youtube_downloader.py','uruchom_downloader.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat'); foreach($file in $files){ $url=($base.TrimEnd('/') + '/' + $file); $destDir=Split-Path -Parent $file; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $file }; exit 0" >> "%INSTALL_LOG%" 2>&1
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $repo='%GITHUB_REPO%'; $branch='%DOWNLOAD_BRANCH%'; $zip=Join-Path $env:TEMP ('vd_branch_' + [guid]::NewGuid().ToString('N') + '.zip'); $tmp=Join-Path $env:TEMP ('vd_branch_' + [guid]::NewGuid().ToString('N')); $url='https://codeload.github.com/' + $repo + '/zip/refs/heads/' + $branch; Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='VideoDownloaderInstaller'} -Uri $url -OutFile $zip; Expand-Archive -Force -Path $zip -DestinationPath $tmp; $root=Get-ChildItem -Path $tmp -Directory | Select-Object -First 1; if(-not $root){ throw 'Branch archive is empty' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat','config/config.json','config/lang/en.lang','config/lang/pl.lang','assets/video_downloader.ico','assets/video_downloader.png'); foreach($file in $files){ $src=Join-Path $root.FullName $file; if(Test-Path $src){ $dest=$file; $destDir=Split-Path -Parent $dest; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Copy-Item -Force -LiteralPath $src -Destination $dest } }; exit 0" >> "%INSTALL_LOG%" 2>&1
 
 )
 
@@ -660,6 +666,26 @@ if "%DEBUG%"=="1" (
 
 exit /b 0
 
+:DownloadAppAssets
+
+if not exist "assets" mkdir "assets" >nul 2>nul
+
+if exist "assets\video_downloader.ico" if exist "assets\video_downloader.png" exit /b 0
+
+if not defined DOWNLOAD_BRANCH set "DOWNLOAD_BRANCH=%GITHUB_BRANCH%"
+
+if "%DEBUG%"=="1" (
+
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Continue'; $ProgressPreference='SilentlyContinue'; $base='https://raw.githubusercontent.com/%GITHUB_REPO%/%DOWNLOAD_BRANCH%/assets'; New-Item -ItemType Directory -Force -Path 'assets' | Out-Null; foreach($file in @('video_downloader.ico','video_downloader.png')){ $dest=Join-Path 'assets' $file; if(-not (Test-Path $dest)){ Invoke-WebRequest -UseBasicParsing -Uri ($base + '/' + $file) -OutFile $dest } }; exit 0"
+
+) else (
+
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Continue'; $ProgressPreference='SilentlyContinue'; $base='https://raw.githubusercontent.com/%GITHUB_REPO%/%DOWNLOAD_BRANCH%/assets'; New-Item -ItemType Directory -Force -Path 'assets' | Out-Null; foreach($file in @('video_downloader.ico','video_downloader.png')){ $dest=Join-Path 'assets' $file; if(-not (Test-Path $dest)){ Invoke-WebRequest -UseBasicParsing -Uri ($base + '/' + $file) -OutFile $dest } }; exit 0" >> "%INSTALL_LOG%" 2>&1
+
+)
+
+exit /b 0
+
 :CreateAppShortcuts
 
 if "%DEBUG%"=="1" (
@@ -673,6 +699,30 @@ if "%DEBUG%"=="1" (
 )
 
 exit /b %ERRORLEVEL%
+
+:SetShortcutIcons
+
+if not exist "%APP_DIR%\assets\video_downloader.ico" exit /b 0
+
+if "%DEBUG%"=="1" (
+
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Continue'; $app='%APP_DIR%'; $icon=Join-Path $app 'assets\video_downloader.ico'; if(-not (Test-Path $icon)){ exit 0 }; $paths=@(); $desktop=[Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory); $publicDesktop=[Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDesktopDirectory); $programs=[Environment]::GetFolderPath([Environment+SpecialFolder]::Programs); $commonPrograms=[Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms); foreach($dir in @($desktop,$publicDesktop,(Join-Path $programs 'Video Downloader'),(Join-Path $commonPrograms 'Video Downloader'))){ if($dir){ $paths += (Join-Path $dir 'Video Downloader.lnk') } }; $shell=New-Object -ComObject WScript.Shell; foreach($path in $paths){ if(Test-Path $path){ $s=$shell.CreateShortcut($path); $s.IconLocation=$icon; $s.Save() } }; exit 0"
+
+) else (
+
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Continue'; $app='%APP_DIR%'; $icon=Join-Path $app 'assets\video_downloader.ico'; if(-not (Test-Path $icon)){ exit 0 }; $paths=@(); $desktop=[Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory); $publicDesktop=[Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDesktopDirectory); $programs=[Environment]::GetFolderPath([Environment+SpecialFolder]::Programs); $commonPrograms=[Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms); foreach($dir in @($desktop,$publicDesktop,(Join-Path $programs 'Video Downloader'),(Join-Path $commonPrograms 'Video Downloader'))){ if($dir){ $paths += (Join-Path $dir 'Video Downloader.lnk') } }; $shell=New-Object -ComObject WScript.Shell; foreach($path in $paths){ if(Test-Path $path){ $s=$shell.CreateShortcut($path); $s.IconLocation=$icon; $s.Save() } }; exit 0" >> "%INSTALL_LOG%" 2>&1
+
+)
+
+exit /b 0
+
+:GrantAppReadPermissions
+
+>> "%INSTALL_LOG%" echo Granting read permissions for standard users in %APP_DIR%.
+
+icacls "%APP_DIR%" /grant "*S-1-5-32-545:(OI)(CI)RX" /T /C >> "%INSTALL_LOG%" 2>&1
+
+exit /b 0
 
 :StepFail
 

@@ -43,6 +43,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Continue'; $ProgressPreference='SilentlyContinue'; $base='https://raw.githubusercontent.com/%GITHUB_REPO%/main/assets'; New-Item -ItemType Directory -Force -Path 'assets' | Out-Null; foreach($file in @('video_downloader.ico','video_downloader.png')){ Invoke-WebRequest -UseBasicParsing -Uri ($base + '/' + $file) -OutFile (Join-Path 'assets' $file) }" >> "%UPDATE_LOG%" 2>&1
+
 echo.
 echo Update complete.
 echo You can start Video Downloader again.

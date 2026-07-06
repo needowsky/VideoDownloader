@@ -6,6 +6,8 @@ Current version: `v2.1`
 
 Repository: https://github.com/needowsky/VideoDownloader
 
+> **Work in progress:** this project is still under active development. Bugs, broken downloads or installer issues may happen. Please report problems in GitHub Issues: https://github.com/needowsky/VideoDownloader/issues
+
 ## One-Command Install
 
 Run this in PowerShell:

@@ -26,10 +26,18 @@ from urllib.request import Request, urlopen
 
 PROGRAM_DIR = Path(__file__).resolve().parent
 LOCAL_PACKAGE_DIR = PROGRAM_DIR / "python_packages"
+LOCAL_PYTHON_EXE = PROGRAM_DIR / "tools" / "python312" / "python.exe"
 LOCAL_FFMPEG_BIN = PROGRAM_DIR / "tools" / "ffmpeg" / "bin"
 LOCAL_OFSCRAPER_PYTHON = PROGRAM_DIR / "tools" / "ofscraper_python" / "python.exe"
 
-if LOCAL_PACKAGE_DIR.exists():
+def is_local_app_python() -> bool:
+    try:
+        return Path(sys.executable).resolve() == LOCAL_PYTHON_EXE.resolve()
+    except OSError:
+        return False
+
+
+if LOCAL_PACKAGE_DIR.exists() and is_local_app_python():
     sys.path.insert(0, str(LOCAL_PACKAGE_DIR))
 
 if (LOCAL_FFMPEG_BIN / "ffmpeg.exe").exists():

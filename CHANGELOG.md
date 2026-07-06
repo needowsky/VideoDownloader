@@ -32,6 +32,8 @@ Focused polish release for updater safety, installer wording and playlist handli
 - Fixed portable Python package visibility by adding the app `python_packages` folder to the embedded Python path file.
 - Fixed launcher startup after clean AIO installs by preferring the bundled Python 3.12 before global Python installations.
 - Fixed `PermissionError` on local package imports from `C:\Program Files\VideoDownloader\python_packages` by granting standard users read permissions during installation.
+- Fixed AIO GitHub downloads hitting `429 Too Many Requests` by downloading the repository as a single ZIP archive instead of many raw files.
+- Fixed PowerShell bootstrap treating administrator hand-off as a failed installer run.
 - Fixed OF-Scraper detection by checking the dedicated `tools/ofscraper_python/python.exe -m ofscraper` command.
 - Fixed shortcut creation by adding fallback Desktop/Start Menu paths and auto-creating the launcher when possible.
 - Fixed `install.ps1` log/file writing to avoid BOM issues in generated batch files and to report AIO installer exit-code failures clearly.
