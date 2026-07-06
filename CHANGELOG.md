@@ -7,6 +7,7 @@ Focused polish release for updater safety, installer wording and playlist handli
 ### Added
 
 - Added external `update.bat` updater. The app now launches it and closes before replacing files from a newer GitHub release.
+- Added a custom application icon used by Desktop and Start Menu shortcuts.
 - Added YouTube playlist preflight with detected item count, estimated size and confirmation before downloading all items.
 - Added `q` stop control during active yt-dlp downloads.
 - Added persistent PowerShell bootstrap logs in `%TEMP%\VideoDownloaderInstallLogs\install_ps1_latest.log`.
@@ -29,6 +30,8 @@ Focused polish release for updater safety, installer wording and playlist handli
 
 - Fixed YouTube playlist/channel statistics so counters use completed items instead of the preflight/expected item count.
 - Fixed portable Python package visibility by adding the app `python_packages` folder to the embedded Python path file.
+- Fixed launcher startup after clean AIO installs by preferring the bundled Python 3.12 before global Python installations.
+- Fixed `PermissionError` on local package imports from `C:\Program Files\VideoDownloader\python_packages` by granting standard users read permissions during installation.
 - Fixed OF-Scraper detection by checking the dedicated `tools/ofscraper_python/python.exe -m ofscraper` command.
 - Fixed shortcut creation by adding fallback Desktop/Start Menu paths and auto-creating the launcher when possible.
 - Fixed `install.ps1` log/file writing to avoid BOM issues in generated batch files and to report AIO installer exit-code failures clearly.
