@@ -2,6 +2,8 @@ param(
     [string]$InstallDir = "$env:ProgramFiles\VideoDownloader",
     [string]$Repo = "needowsky/VideoDownloader",
     [string]$Branch = "main",
+    [ValidateSet("branch", "release")]
+    [string]$DownloadMode = "branch",
     [ValidateSet("en", "pl")]
     [string]$Lang = "en",
     [switch]$Debug,
@@ -28,7 +30,8 @@ function Write-Log {
     param([string]$Message)
 
     $line = "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
-    Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::AppendAllText($LogPath, $line + [Environment]::NewLine, $utf8NoBom)
     Copy-Item -Force -LiteralPath $LogPath -Destination $LatestLogPath -ErrorAction SilentlyContinue
 }
 
@@ -141,6 +144,10 @@ function Try-DownloadRawInstaller {
         $url = "https://raw.githubusercontent.com/$Repo/$RawBranch/$InstallerName"
         Write-Log "Downloading raw installer: $url"
         Invoke-Download -Url $url -OutFile $InstallerPath
+        $head = Get-Content -LiteralPath $InstallerPath -TotalCount 1 -ErrorAction Stop
+        if ($head -notmatch '(@echo off|setlocal|::)') {
+            throw "Downloaded file does not look like a batch installer."
+        }
         return $true
     } catch {
         Write-ScreenLog "Raw branch '$RawBranch' failed: $($_.Exception.Message)"
@@ -154,15 +161,19 @@ function Update-InstallerSettings {
     $text = $text -replace 'set "DEBUG=[01]"', ('set "DEBUG=' + $debugValue + '"')
     $text = $text -replace 'set "LANG=(en|pl)"', ('set "LANG=' + $Lang + '"')
     $text = $text -replace 'set "GITHUB_REPO=[^"]+"', ('set "GITHUB_REPO=' + $Repo + '"')
-    $text = $text -replace 'set "GITHUB_DOWNLOAD_MODE=[^"]+"', 'set "GITHUB_DOWNLOAD_MODE=branch"'
+    $text = $text -replace 'set "GITHUB_DOWNLOAD_MODE=[^"]+"', ('set "GITHUB_DOWNLOAD_MODE=' + $DownloadMode + '"')
     $text = $text -replace 'set "GITHUB_BRANCH=[^"]+"', ('set "GITHUB_BRANCH=' + $Branch + '"')
     $text = $text -replace 'if not defined INSTALL_DIR set "INSTALL_DIR=[^"]+"', ('if not defined INSTALL_DIR set "INSTALL_DIR=' + $InstallDir + '"')
 
-    Set-Content -LiteralPath $InstallerPath -Value $text -Encoding UTF8
+    $text = $text -replace "`r?`n", "`r`n"
+    $encoding = New-Object System.Text.ASCIIEncoding
+    [System.IO.File]::WriteAllText($InstallerPath, $text, $encoding)
 }
 
 function Start-AioInstaller {
     $env:INSTALL_DIR = $InstallDir
+    $env:GITHUB_REPO = $Repo
+    $env:GITHUB_BRANCH = $Branch
 
     if ($NoRun) {
         Write-ScreenLog "NoRun enabled. Installer downloaded to: $InstallerPath"
@@ -172,6 +183,20 @@ function Start-AioInstaller {
     Write-ScreenLog "Starting AIO installer..."
     & cmd.exe /c "`"$InstallerPath`""
     Write-Log ("AIO installer exited with code: " + $LASTEXITCODE)
+    if ($LASTEXITCODE -ne 0) {
+        throw "AIO installer failed with exit code $LASTEXITCODE."
+    }
+}
+
+function Test-IsAdministrator {
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch {
+        Write-Log ("Administrator check failed: " + $_.Exception.Message)
+        return $false
+    }
 }
 
 $hadError = $false
@@ -181,9 +206,17 @@ try {
     Write-ScreenLog " Video Downloader PowerShell Installer"
     Write-ScreenLog "==============================================="
     Write-ScreenLog "Repository: $Repo"
+    Write-ScreenLog "Source:     $DownloadMode"
     Write-ScreenLog "Target:     $InstallDir"
     Write-ScreenLog "Language:   $Lang"
     Write-ScreenLog "Log:        $LogPath"
+    if ($InstallDir -like "$env:ProgramFiles*") {
+        if (Test-IsAdministrator) {
+            Write-ScreenLog "Permission: Administrator"
+        } else {
+            Write-ScreenLog "Permission: Standard user - Windows may ask for administrator permission."
+        }
+    }
     Write-ScreenLog ""
 
     New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
@@ -192,12 +225,23 @@ try {
     Write-ScreenLog "Workspace: $WorkDir"
 
     Write-Step 2 4 "Downloading AIO installer from GitHub"
-    $downloaded = Try-DownloadLatestReleaseInstaller
-    if (-not $downloaded) {
+    $downloaded = $false
+    if ($DownloadMode -ieq "branch") {
         $downloaded = Try-DownloadRawInstaller -RawBranch $Branch
-    }
-    if (-not $downloaded -and $Branch -ine "master") {
-        $downloaded = Try-DownloadRawInstaller -RawBranch "master"
+        if (-not $downloaded -and $Branch -ine "master") {
+            $downloaded = Try-DownloadRawInstaller -RawBranch "master"
+        }
+        if (-not $downloaded) {
+            $downloaded = Try-DownloadLatestReleaseInstaller
+        }
+    } else {
+        $downloaded = Try-DownloadLatestReleaseInstaller
+        if (-not $downloaded) {
+            $downloaded = Try-DownloadRawInstaller -RawBranch $Branch
+        }
+        if (-not $downloaded -and $Branch -ine "master") {
+            $downloaded = Try-DownloadRawInstaller -RawBranch "master"
+        }
     }
     if (-not $downloaded) {
         throw "Cannot download $InstallerName from GitHub. Check internet connection, repository visibility and release files."

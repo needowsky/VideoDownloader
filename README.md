@@ -16,6 +16,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 
 This downloads the full AIO installer from GitHub, applies settings and launches dependency setup. The installer then downloads or verifies Python, pip, Microsoft C++ Build Tools, FFmpeg, `yt-dlp`, `gallery-dl`, `spotDL` and `OF-Scraper`.
 
+By default, the PowerShell bootstrap downloads the AIO installer from the `main` branch. To force the newest GitHub release instead, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/needowsky/VideoDownloader/main/install.ps1))) -DownloadMode release"
+```
+
 PowerShell bootstrap logs are saved here:
 
 ```text
@@ -61,11 +67,11 @@ The installer:
 
 - asks for administrator permission,
 - installs the app into `C:\Program Files\VideoDownloader`,
-- creates a desktop shortcut named `Video Downloader`,
+- creates shortcuts named `Video Downloader` on the Desktop and in the Start Menu,
 - downloads app files from GitHub releases,
 - checks whether components are already installed before downloading them,
 - installs or verifies Python, pip, Microsoft C++ Build Tools, FFmpeg, `yt-dlp`, `gallery-dl`, `spotDL` and `OF-Scraper`,
-- uses a portable Python 3.12 fallback if Windows has a broken Python registration or Python is not visible after installation,
+- uses portable Python 3.12 inside the app folder when a compatible Python is missing or broken; it does not install Python globally,
 - installs `OF-Scraper` in its own portable Python environment to avoid dependency conflicts with `spotDL`,
 - shows step progress and overall progress, including already-installed and update-check statuses,
 - retries failed Python package installs with fallback methods for difficult dependencies,
@@ -73,7 +79,7 @@ The installer:
 
 ## Run
 
-Use the desktop shortcut or run:
+Use the desktop shortcut, the Start Menu shortcut, or run:
 
 ```text
 uruchom_downloader.bat

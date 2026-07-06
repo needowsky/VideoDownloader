@@ -400,13 +400,13 @@ if not defined FFMPEG_FOUND (
 
 call :StepOk 10
 
-call :StepStart 11 "Desktop shortcut"
+call :StepStart 11 "Shortcuts"
 
-call :CreateDesktopShortcut
+call :CreateAppShortcuts
 
 if errorlevel 1 (
 
-    call :StepFail "desktop shortcut"
+    call :StepFail "shortcuts"
 
     pause
 
@@ -424,7 +424,7 @@ echo  Done - 100%% success
 
 echo  Installed in: %APP_DIR%
 
-echo  Desktop shortcut: Video Downloader
+echo  Shortcuts: Desktop and Start Menu
 
 echo ================================================
 
@@ -660,15 +660,15 @@ if "%DEBUG%"=="1" (
 
 exit /b 0
 
-:CreateDesktopShortcut
+:CreateAppShortcuts
 
 if "%DEBUG%"=="1" (
 
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $target=Join-Path '%APP_DIR%' 'uruchom_downloader.bat'; if(-not (Test-Path $target)){ throw 'Launcher not found: ' + $target }; $desktop=[Environment]::GetFolderPath('Desktop'); if(-not $desktop){ throw 'Desktop folder not found' }; $shortcutPath=Join-Path $desktop 'Video Downloader.lnk'; $shell=New-Object -ComObject WScript.Shell; $shortcut=$shell.CreateShortcut($shortcutPath); $shortcut.TargetPath=$target; $shortcut.WorkingDirectory='%APP_DIR%'; $shortcut.Description='Video Downloader'; $shortcut.IconLocation='%SystemRoot%\System32\shell32.dll,220'; $shortcut.Save(); exit 0"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $app='%APP_DIR%'; $target=Join-Path $app 'uruchom_downloader.bat'; $py=Join-Path $app 'youtube_downloader.py'; if((-not (Test-Path $target)) -and (Test-Path $py)){ $lines=@('@echo off','cd /d ""%%~dp0""','if exist ""tools\python312\python.exe"" (','    ""tools\python312\python.exe"" youtube_downloader.py',') else (','    python youtube_downloader.py',')','pause'); Set-Content -Path $target -Value $lines -Encoding ASCII }; if(-not (Test-Path $target)){ throw 'Launcher not found: ' + $target }; $shell=New-Object -ComObject WScript.Shell; function New-Link($dir){ if([string]::IsNullOrWhiteSpace($dir)){ return $false }; New-Item -ItemType Directory -Force -Path $dir | Out-Null; $path=Join-Path $dir 'Video Downloader.lnk'; $s=$shell.CreateShortcut($path); $s.TargetPath=$target; $s.WorkingDirectory=$app; $s.Description='Video Downloader'; $s.IconLocation=$env:SystemRoot + '\System32\shell32.dll,220'; $s.Save(); return (Test-Path $path) }; $desktop=[Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory); $publicDesktop=[Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDesktopDirectory); $programs=[Environment]::GetFolderPath([Environment+SpecialFolder]::Programs); $commonPrograms=[Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms); $desktopOk=(New-Link $desktop) -or (New-Link $publicDesktop); $startDir=if($programs){ Join-Path $programs 'Video Downloader' } else { Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Video Downloader' }; $commonStartDir=if($commonPrograms){ Join-Path $commonPrograms 'Video Downloader' } else { $null }; $startOk=(New-Link $startDir) -or (New-Link $commonStartDir); if((-not $desktopOk) -or (-not $startOk)){ throw ('Shortcut creation failed. Desktop=' + $desktopOk + ' StartMenu=' + $startOk) }; exit 0"
 
 ) else (
 
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $target=Join-Path '%APP_DIR%' 'uruchom_downloader.bat'; if(-not (Test-Path $target)){ throw 'Launcher not found: ' + $target }; $desktop=[Environment]::GetFolderPath('Desktop'); if(-not $desktop){ throw 'Desktop folder not found' }; $shortcutPath=Join-Path $desktop 'Video Downloader.lnk'; $shell=New-Object -ComObject WScript.Shell; $shortcut=$shell.CreateShortcut($shortcutPath); $shortcut.TargetPath=$target; $shortcut.WorkingDirectory='%APP_DIR%'; $shortcut.Description='Video Downloader'; $shortcut.IconLocation='%SystemRoot%\System32\shell32.dll,220'; $shortcut.Save(); exit 0" >> "%INSTALL_LOG%" 2>&1
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $app='%APP_DIR%'; $target=Join-Path $app 'uruchom_downloader.bat'; $py=Join-Path $app 'youtube_downloader.py'; if((-not (Test-Path $target)) -and (Test-Path $py)){ $lines=@('@echo off','cd /d ""%%~dp0""','if exist ""tools\python312\python.exe"" (','    ""tools\python312\python.exe"" youtube_downloader.py',') else (','    python youtube_downloader.py',')','pause'); Set-Content -Path $target -Value $lines -Encoding ASCII }; if(-not (Test-Path $target)){ throw 'Launcher not found: ' + $target }; $shell=New-Object -ComObject WScript.Shell; function New-Link($dir){ if([string]::IsNullOrWhiteSpace($dir)){ return $false }; New-Item -ItemType Directory -Force -Path $dir | Out-Null; $path=Join-Path $dir 'Video Downloader.lnk'; $s=$shell.CreateShortcut($path); $s.TargetPath=$target; $s.WorkingDirectory=$app; $s.Description='Video Downloader'; $s.IconLocation=$env:SystemRoot + '\System32\shell32.dll,220'; $s.Save(); return (Test-Path $path) }; $desktop=[Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory); $publicDesktop=[Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDesktopDirectory); $programs=[Environment]::GetFolderPath([Environment+SpecialFolder]::Programs); $commonPrograms=[Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms); $desktopOk=(New-Link $desktop) -or (New-Link $publicDesktop); $startDir=if($programs){ Join-Path $programs 'Video Downloader' } else { Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Video Downloader' }; $commonStartDir=if($commonPrograms){ Join-Path $commonPrograms 'Video Downloader' } else { $null }; $startOk=(New-Link $startDir) -or (New-Link $commonStartDir); if((-not $desktopOk) -or (-not $startOk)){ throw ('Shortcut creation failed. Desktop=' + $desktopOk + ' StartMenu=' + $startOk) }; exit 0" >> "%INSTALL_LOG%" 2>&1
 
 )
 
@@ -725,6 +725,18 @@ if /i "%ERR_STAGE%"=="desktop shortcut" (
     echo Error type: Cannot create desktop shortcut.
 
     echo Reason: The Desktop folder is unavailable, the launcher is missing, or Windows blocked shortcut creation.
+
+    echo How to fix: Start the app manually from %APP_DIR%\uruchom_downloader.bat or run the installer again as administrator.
+
+    exit /b 0
+
+)
+
+if /i "%ERR_STAGE%"=="shortcuts" (
+
+    echo Error type: Cannot create app shortcuts.
+
+    echo Reason: Desktop or Start Menu folder is unavailable, the launcher is missing, or Windows blocked shortcut creation.
 
     echo How to fix: Start the app manually from %APP_DIR%\uruchom_downloader.bat or run the installer again as administrator.
 
@@ -970,14 +982,6 @@ if not errorlevel 1 (
 
 if defined PYTHON_EXE exit /b 0
 
-for /f "delims=" %%P in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$candidates=@(); foreach($cmd in 'python','python3'){ $c=Get-Command $cmd -ErrorAction SilentlyContinue; if($c){ $candidates += $c.Source } }; $roots=@($env:ProgramFiles, ${env:ProgramFiles(x86)}, (Join-Path $env:LocalAppData 'Programs\Python')); foreach($root in $roots){ if($root -and (Test-Path $root)){ Get-ChildItem -Path $root -Recurse -Filter python.exe -ErrorAction SilentlyContinue | ForEach-Object { $candidates += $_.FullName } } }; $candidates | Select-Object -Unique" 2^>nul') do (
-
-    if not defined PYTHON_EXE call :UsePythonCandidate "%%P"
-
-)
-
-if defined PYTHON_EXE exit /b 0
-
 for /d %%D in ("%LocalAppData%\Programs\Python\Python3*") do (
 
     if not defined PYTHON_EXE if exist "%%~fD\python.exe" call :UsePythonCandidate "%%~fD\python.exe"
@@ -1114,54 +1118,18 @@ exit /b 0
 
 :InstallPython
 
-call :InstallPythonDirect
-
-if not errorlevel 1 call :FindPython
-
-if defined PYTHON_EXE (
-
-    set "PYTHON_WAS_INSTALLED=1"
-
-    exit /b 0
-
-)
-
-call :RepairPythonDirect
-
-if not errorlevel 1 call :FindPython
-
-if defined PYTHON_EXE (
-
-    set "PYTHON_WAS_INSTALLED=1"
-
-    exit /b 0
-
-)
-
-call :InstallWithWingetForce "Python.Python.3.12"
-
-if not errorlevel 1 call :FindPython
-
-if defined PYTHON_EXE (
-
-    set "PYTHON_WAS_INSTALLED=1"
-
-    exit /b 0
-
-)
-
-call :InstallWithWinget "Python.Python.3.12"
-if not errorlevel 1 call :FindPython
-if defined PYTHON_EXE (
-    set "PYTHON_WAS_INSTALLED=1"
-    exit /b 0
-)
 call :InstallPythonPortable
+
 if not errorlevel 1 call :FindPython
+
 if defined PYTHON_EXE (
+
     set "PYTHON_WAS_INSTALLED=1"
+
     exit /b 0
+
 )
+
 exit /b 1
 
 :InstallWithWinget
