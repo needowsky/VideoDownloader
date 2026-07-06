@@ -180,6 +180,17 @@ function Start-AioInstaller {
         return
     }
 
+    $needsAdmin = ($InstallDir -like "$env:ProgramFiles*") -and -not (Test-IsAdministrator)
+    if ($needsAdmin) {
+        Write-ScreenLog "Opening AIO installer in administrator window..."
+        Write-ScreenLog "Continue installation in the new administrator window."
+        Write-Log "Starting AIO installer with UAC elevation."
+        $arguments = "/c `"$InstallerPath`""
+        Start-Process -FilePath "cmd.exe" -ArgumentList $arguments -WorkingDirectory $WorkDir -Verb RunAs | Out-Null
+        Write-Log "AIO installer was handed off to administrator window."
+        return
+    }
+
     Write-ScreenLog "Starting AIO installer..."
     & cmd.exe /c "`"$InstallerPath`""
     Write-Log ("AIO installer exited with code: " + $LASTEXITCODE)
@@ -250,7 +261,7 @@ try {
     Write-Step 3 4 "Applying installer settings"
     Update-InstallerSettings
 
-    Write-Step 4 4 "Launching full installer"
+    Write-Step 4 4 "Opening full installer"
     Start-AioInstaller
     Save-LogCopyToInstallDir
 } catch {
