@@ -27,6 +27,7 @@ from urllib.request import Request, urlopen
 PROGRAM_DIR = Path(__file__).resolve().parent
 LOCAL_PACKAGE_DIR = PROGRAM_DIR / "python_packages"
 LOCAL_FFMPEG_BIN = PROGRAM_DIR / "tools" / "ffmpeg" / "bin"
+LOCAL_OFSCRAPER_PYTHON = PROGRAM_DIR / "tools" / "ofscraper_python" / "python.exe"
 
 if LOCAL_PACKAGE_DIR.exists():
     sys.path.insert(0, str(LOCAL_PACKAGE_DIR))
@@ -3222,6 +3223,9 @@ def show_ofscraper_help() -> None:
 
 
 def get_ofscraper_command() -> list[str] | None:
+    if LOCAL_OFSCRAPER_PYTHON.exists():
+        return [str(LOCAL_OFSCRAPER_PYTHON), "-m", "ofscraper"]
+
     local_candidates = [
         LOCAL_PACKAGE_DIR / "Scripts" / "ofscraper.exe",
         LOCAL_PACKAGE_DIR / "bin" / "ofscraper",

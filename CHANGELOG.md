@@ -9,18 +9,25 @@ Focused polish release for updater safety, installer wording and playlist handli
 - Added external `update.bat` updater. The app now launches it and closes before replacing files from a newer GitHub release.
 - Added YouTube playlist preflight with detected item count, estimated size and confirmation before downloading all items.
 - Added `q` stop control during active yt-dlp downloads.
+- Added persistent PowerShell bootstrap logs in `%TEMP%\VideoDownloaderInstallLogs\install_ps1_latest.log`.
 
 ### Changed
 
 - App version is now `v2.1`.
 - Installer step text now says `Downloading application files` instead of `Downloading program files`.
 - Installer progress now shows step percent and overall percent, and installed components are reported as already installed, installed, or checked for updates.
+- Installer package progress now displays separate step and overall progress bars.
 - Installer now retries failed Python package installs with fallback methods, including Python 3.12/VC++ preparation, `--prefer-binary`, and user-site installation.
+- Installer now falls back to portable Python 3.12 when Windows has a broken Python registration or Python remains invisible after a successful installer/winget run.
+- OF-Scraper now installs into its own portable Python 3.12 environment so its dependencies do not conflict with `spotDL`.
+- PowerShell bootstrap now logs failures before closing and pauses when launched from a local `.ps1` file.
 - Improved menu navigation by clearing previous screens and adding back options in download submenus.
 
 ### Fixed
 
 - Fixed YouTube playlist/channel statistics so counters use completed items instead of the preflight/expected item count.
+- Fixed portable Python package visibility by adding the app `python_packages` folder to the embedded Python path file.
+- Fixed OF-Scraper detection by checking the dedicated `tools/ofscraper_python/python.exe -m ofscraper` command.
 
 ## v2.0
 

@@ -16,6 +16,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 
 This downloads the full AIO installer from GitHub, applies settings and launches dependency setup. The installer then downloads or verifies Python, pip, Microsoft C++ Build Tools, FFmpeg, `yt-dlp`, `gallery-dl`, `spotDL` and `OF-Scraper`.
 
+PowerShell bootstrap logs are saved here:
+
+```text
+%TEMP%\VideoDownloaderInstallLogs\install_ps1_latest.log
+```
+
 ## What It Does
 
 Video Downloader downloads audio, video, photos and large files from supported sources using proven tools such as `yt-dlp`, `gallery-dl`, `spotDL` and `OF-Scraper`.
@@ -59,6 +65,8 @@ The installer:
 - downloads app files from GitHub releases,
 - checks whether components are already installed before downloading them,
 - installs or verifies Python, pip, Microsoft C++ Build Tools, FFmpeg, `yt-dlp`, `gallery-dl`, `spotDL` and `OF-Scraper`,
+- uses a portable Python 3.12 fallback if Windows has a broken Python registration or Python is not visible after installation,
+- installs `OF-Scraper` in its own portable Python environment to avoid dependency conflicts with `spotDL`,
 - shows step progress and overall progress, including already-installed and update-check statuses,
 - retries failed Python package installs with fallback methods for difficult dependencies,
 - hides technical logs by default when `DEBUG=0`.
