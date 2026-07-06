@@ -2,7 +2,7 @@
 
 Windows console downloader written in Python.
 
-Current version: `v2.5`
+Current version: `v3.0`
 
 Repository: https://github.com/needowsky/VideoDownloader
 
@@ -28,6 +28,33 @@ PowerShell bootstrap logs are saved here:
 
 ```text
 %TEMP%\VideoDownloaderInstallLogs\install_ps1_latest.log
+```
+
+## Windows EXE Installer
+
+The GitHub release also includes an AIO `.exe` installer:
+
+```text
+VideoDownloader-EXE_3.0-AIO-Installer.zip
+VideoDownloader_AIO_Installer_EXE_3_0.exe
+```
+
+This installer contains the application files and launches the same full setup flow as `zainstaluj_wszystko.bat`. It asks for administrator permission, installs the app into `C:\Program Files\VideoDownloader`, verifies or installs required components, and creates Desktop/Start Menu shortcuts.
+
+The `EXE_3.0` installer is intended as the easiest Windows installation path. It bundles the application files, skips downloading the app source again, and lets the internal AIO setup handle Python portable, FFmpeg, downloader tools and helper libraries.
+
+The EXE installer checks GitHub Releases for newer EXE installer releases named or tagged like:
+
+```text
+EXE_3.0
+```
+
+It also accepts `EXE-3.0` and `EXE 3.0`. If a newer EXE installer release is available, it can download and start the newer installer before continuing.
+
+The EXE installer log is saved here:
+
+```text
+%TEMP%\VideoDownloaderAIO\aio_installer_latest.log
 ```
 
 ## What It Does
@@ -108,6 +135,9 @@ zainstaluj_wszystko.bat
 install.ps1
 uruchom_downloader.bat
 update.bat
+aio_installer/VideoDownloader_AIO_Installer.py
+aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_0.exe
+aio_exe_release/VideoDownloader-EXE_3.0-AIO-Installer.zip
 README.md
 CHANGELOG.md
 LICENSE
@@ -242,6 +272,16 @@ update
 
 The app checks the latest GitHub release and compares it with local `APP_VERSION`.
 When a newer release is available, the app asks for confirmation, starts `update.bat`, and closes so the updater can overwrite existing application files safely.
+
+The updater also copies installer-related files from the release/source package, including:
+
+```text
+aio_installer/VideoDownloader_AIO_Installer.py
+aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_0.exe
+aio_exe_release/VideoDownloader-EXE_3.0-AIO-Installer.zip
+```
+
+The standalone EXE installer has a separate self-update check for GitHub Releases tagged or named like `EXE_3.0`.
 
 ## Notes
 

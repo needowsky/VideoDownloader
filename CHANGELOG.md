@@ -1,8 +1,8 @@
 # Changelog
 
-## v2.5
+## v3.0
 
-Release prepared for GitHub with a cleaner installer, safer update flow, neutral public configuration and new foundations for a modern interface and local data storage.
+Consolidated release covering all changes introduced after `v2.0`, focused on the Windows AIO EXE installer, safer updates, cleaner installation, neutral public configuration, modern UI foundations and local data storage.
 
 ### Added
 
@@ -17,10 +17,14 @@ Release prepared for GitHub with a cleaner installer, safer update flow, neutral
 - Added Rich/Textual dependencies and Rich-powered terminal header fallback.
 - Added SQLite storage foundation for user configuration, statistics, counters and history.
 - Added `browser-cookie3`, BeautifulSoup/lxml and mutagen foundations for browser cookies, HTML link extraction and MP3 metadata/cover-art tagging.
+- Added Windows AIO `.exe` installer build for GitHub releases. It bundles the app files and runs the same setup flow as `zainstaluj_wszystko.bat`.
+- Added EXE installer self-update check for GitHub Releases named or tagged like `EXE_3.0`.
+- Added `EXE_3.0` installer assets to installer/update file copy lists.
+- Added release-ready EXE assets: `VideoDownloader_AIO_Installer_EXE_3_0.exe` and `VideoDownloader-EXE_3.0-AIO-Installer.zip`.
 
 ### Changed
 
-- App version is now `v2.5`.
+- Release documentation is now prepared for `v3.0` / `EXE_3.0`.
 - Installer step text now says `Downloading application files` instead of `Downloading program files`.
 - Installer progress now shows step percent and overall percent, and installed components are reported as already installed, installed, or checked for updates.
 - Installer package progress now displays separate step and overall progress bars.
@@ -33,6 +37,8 @@ Release prepared for GitHub with a cleaner installer, safer update flow, neutral
 - Improved menu navigation by clearing previous screens and adding back options in download submenus.
 - Download counters are now stored in user/config stats data instead of being embedded in `youtube_downloader.py`.
 - Installer now verifies UI/helper libraries as a dedicated dependency step.
+- EXE installer release detection now supports tags such as `EXE_3.0`, `EXE-3.0` and `EXE 3.0`.
+- `update.bat` now includes EXE installer assets in its copied update file list.
 
 ### Fixed
 
