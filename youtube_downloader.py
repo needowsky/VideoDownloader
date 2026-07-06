@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from datetime import datetime
 import hashlib
 import importlib.util
@@ -12,6 +13,7 @@ import re
 import shutil
 from shutil import which
 import socket
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -29,6 +31,8 @@ LOCAL_PACKAGE_DIR = PROGRAM_DIR / "python_packages"
 LOCAL_PYTHON_EXE = PROGRAM_DIR / "tools" / "python312" / "python.exe"
 LOCAL_FFMPEG_BIN = PROGRAM_DIR / "tools" / "ffmpeg" / "bin"
 LOCAL_OFSCRAPER_PYTHON = PROGRAM_DIR / "tools" / "ofscraper_python" / "python.exe"
+REMOTE_VALIDATION_BY_URL: dict[str, dict[str, object]] = {}
+REMOTE_VALIDATION_BY_PATH: dict[str, dict[str, object]] = {}
 
 def is_local_app_python() -> bool:
     try:
@@ -49,6 +53,33 @@ except ImportError:
     yt_dlp = None
 
 try:
+    from rich.console import Console
+    from rich.panel import Panel
+except ImportError:
+    Console = None
+    Panel = None
+
+try:
+    import browser_cookie3
+except ImportError:
+    browser_cookie3 = None
+
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    BeautifulSoup = None
+
+try:
+    import lxml  # noqa: F401
+except ImportError:
+    lxml = None
+
+try:
+    import mutagen
+except ImportError:
+    mutagen = None
+
+try:
     import msvcrt
 except ImportError:
     msvcrt = None
@@ -60,17 +91,16 @@ CONFIG_DIR = PROGRAM_DIR / "config"
 APP_CONFIG_DIR = APP_DATA_DIR / "config"
 LOCAL_CONFIG_FILE = CONFIG_DIR / "config.json"
 CONFIG_FILE = APP_CONFIG_DIR / "config.json"
+LOCAL_STATS_CONFIG_FILE = CONFIG_DIR / "stats.json"
+STATS_CONFIG_FILE = APP_CONFIG_DIR / "stats.json"
+DATABASE_FILE = APP_CONFIG_DIR / "app.db"
 LANG_DIR = CONFIG_DIR / "lang"
 APP_LANG_DIR = APP_CONFIG_DIR / "lang"
 HISTORY_FILE = APP_DATA_DIR / "history.jsonl"
 LOCAL_LARGE_FILE_QUEUE_FILE = PROGRAM_DIR / "download_queue.txt"
 LARGE_FILE_QUEUE_FILE = APP_DATA_DIR / "download_queue.txt"
-LOCAL_DOWNLOAD_STATS_FILE = PROGRAM_DIR / ".download_stats"
-DOWNLOAD_STATS_FILE = APP_DATA_DIR / ".download_stats"
-FALLBACK_DOWNLOAD_STATS_FILE = Path(".download_stats")
-LOCAL_DOWNLOAD_BREAKDOWN_FILE = PROGRAM_DIR / ".download_breakdown"
-DOWNLOAD_BREAKDOWN_FILE = APP_DATA_DIR / ".download_breakdown"
-FALLBACK_DOWNLOAD_BREAKDOWN_FILE = Path(".download_breakdown")
+LEGACY_DOWNLOAD_STATS_FILE = APP_DATA_DIR / ".download_stats"
+LEGACY_DOWNLOAD_BREAKDOWN_FILE = APP_DATA_DIR / ".download_breakdown"
 LOCAL_SNAKE_STATS_FILE = PROGRAM_DIR / ".snake_scoreboard"
 SNAKE_STATS_FILE = APP_DATA_DIR / ".snake_scoreboard"
 FALLBACK_SNAKE_STATS_FILE = Path(".snake_scoreboard")
@@ -101,7 +131,7 @@ WINDOWS_RESERVED_NAMES = {
 }
 DEBUG = 0
 LANG = "en"
-APP_VERSION = "v2.1"
+APP_VERSION = "v2.5"
 GITHUB_REPO = "needowsky/VideoDownloader"
 SKIP_EXIT_PAUSE = False
 FACEBOOK_COOKIES_FROM_BROWSER = "chrome"  # chrome/firefox/edge/opera/brave/vivaldi or empty
@@ -111,7 +141,6 @@ DEFAULT_MEDIA_TYPE = "mp4"
 LARGE_FILE_EXTENSIONS = (".zip", ".rar", ".7z", ".iso")
 LARGE_FILE_MAX_RETRIES = 10
 LARGE_FILE_CHUNK_SIZE = 1024 * 1024
-_N0R_FF = "04000000"
 _SNEK_FF = "0700000007000000"
 PROGRESS_BAR_WIDTH = 10
 MIN_PROGRESS_BAR_WIDTH = 10
@@ -345,9 +374,15 @@ class DownloadCancelled(Exception):
 def ask_choice(prompt: str, options: dict[str, str]) -> str:
     while True:
         print()
-        print(prompt)
-        for key, label in options.items():
-            print(f"{key}. {label}")
+        console = get_rich_console()
+        if console is not None:
+            console.print(f"[bold cyan]{prompt}[/bold cyan]")
+            for key, label in options.items():
+                console.print(f"[bold green]{key}[/bold green]. {label}")
+        else:
+            print(prompt)
+            for key, label in options.items():
+                print(f"{key}. {label}")
 
         choice = input(t("choose_option")).strip()
         if choice in options:
@@ -371,10 +406,17 @@ def ask_download_type_choice() -> str:
     default_choice = "1" if DEFAULT_MEDIA_TYPE == "mp3" else "2"
     while True:
         print()
-        print(t("what_download"))
-        for key, label in options.items():
-            suffix = " [default]" if key == default_choice else ""
-            print(f"{key}. {label}{suffix}")
+        console = get_rich_console()
+        if console is not None:
+            console.print(f"[bold cyan]{t('what_download')}[/bold cyan]")
+            for key, label in options.items():
+                suffix = " [default]" if key == default_choice else ""
+                console.print(f"[bold green]{key}[/bold green]. {label}{suffix}")
+        else:
+            print(t("what_download"))
+            for key, label in options.items():
+                suffix = " [default]" if key == default_choice else ""
+                print(f"{key}. {label}{suffix}")
 
         choice = input(t("choose_option")).strip()
         if not choice:
@@ -549,6 +591,11 @@ def run_doctor() -> None:
     doctor_line("gallery-dl", has_gallery_dl())
     doctor_line("spotDL", has_spotdl())
     doctor_line("OF-Scraper", has_ofscraper())
+    doctor_line("Rich/Textual", Console is not None and importlib.util.find_spec("textual") is not None)
+    doctor_line("browser-cookie3", browser_cookie3 is not None)
+    doctor_line("BeautifulSoup/lxml", BeautifulSoup is not None and lxml is not None)
+    doctor_line("mutagen", mutagen is not None)
+    doctor_line("SQLite", True, sqlite3.sqlite_version)
     doctor_line(t("doctor_internet"), has_internet_connection())
     path, error = validate_download_dir(str(DEFAULT_DOWNLOAD_DIR))
     doctor_line(t("doctor_save_dir"), path is not None, str(path or error))
@@ -585,6 +632,76 @@ def show_supported_sites() -> None:
     print()
 
 
+def get_rich_console() -> object | None:
+    if Console is None:
+        return None
+    try:
+        return Console()
+    except Exception:
+        return None
+
+
+def print_app_header() -> None:
+    title = t("app_title", version=APP_VERSION)
+    console = get_rich_console()
+    if console is not None and Panel is not None:
+        console.print(Panel.fit(title, border_style="cyan"))
+        return
+    print(title)
+
+
+def init_database() -> None:
+    try:
+        DATABASE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(DATABASE_FILE) as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS kv ("
+                "key TEXT PRIMARY KEY, "
+                "value TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL)"
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS history ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "created_at TEXT NOT NULL, "
+                "media_type TEXT NOT NULL, "
+                "site TEXT NOT NULL, "
+                "url TEXT NOT NULL, "
+                "title TEXT NOT NULL)"
+            )
+            conn.commit()
+    except sqlite3.Error:
+        return
+
+
+def db_get_json(key: str) -> dict[str, object] | None:
+    try:
+        init_database()
+        with sqlite3.connect(DATABASE_FILE) as conn:
+            row = conn.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
+        if not row:
+            return None
+        data = json.loads(str(row[0]))
+        return data if isinstance(data, dict) else None
+    except (sqlite3.Error, json.JSONDecodeError, OSError):
+        return None
+
+
+def db_set_json(key: str, value: dict[str, object]) -> None:
+    try:
+        init_database()
+        payload = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        with sqlite3.connect(DATABASE_FILE) as conn:
+            conn.execute(
+                "INSERT INTO kv(key, value, updated_at) VALUES(?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                (key, payload, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
+            conn.commit()
+    except (sqlite3.Error, OSError):
+        return
+
+
 def get_config_file() -> Path:
     if LOCAL_CONFIG_FILE.exists():
         return LOCAL_CONFIG_FILE
@@ -607,6 +724,7 @@ def get_config_data() -> dict[str, object]:
 
 def save_config() -> None:
     data = get_config_data()
+    db_set_json("config", data)
     for path in (LOCAL_CONFIG_FILE, CONFIG_FILE):
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -622,12 +740,24 @@ def load_config() -> None:
 
     path = get_config_file()
     if not path.exists():
-        save_config()
-        return
+        db_config = db_get_json("config")
+        if db_config:
+            data = db_config
+        else:
+            save_config()
+            return
+    else:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            db_config = db_get_json("config")
+            if db_config:
+                data = db_config
+            else:
+                save_config()
+                return
 
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    if not isinstance(data, dict):
         save_config()
         return
 
@@ -648,6 +778,7 @@ def load_config() -> None:
     FACEBOOK_COOKIES_FROM_BROWSER = str(data.get("facebook_cookies_from_browser", FACEBOOK_COOKIES_FROM_BROWSER)).strip()
     FACEBOOK_COOKIES_FILE = str(data.get("facebook_cookies_file", FACEBOOK_COOKIES_FILE)).strip()
     ONLYFANS_COOKIES_FILE = str(data.get("onlyfans_cookies_file", ONLYFANS_COOKIES_FILE)).strip()
+    db_set_json("config", get_config_data())
 
 
 def show_settings_menu() -> None:
@@ -703,6 +834,7 @@ def add_history_entries(urls: Iterable[str], media_type: str, saved_items: Itera
     if not items:
         return
     urls_list = list(urls)
+    history_rows: list[dict[str, str]] = []
     try:
         HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         with HISTORY_FILE.open("a", encoding="utf-8") as file:
@@ -713,26 +845,69 @@ def add_history_entries(urls: Iterable[str], media_type: str, saved_items: Itera
                     source_url = urls_list[index]
                 else:
                     source_url = ""
+                row = {
+                    "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "media_type": media_type,
+                    "site": detect_site(source_url) if source_url else "",
+                    "url": source_url,
+                    "title": item,
+                }
+                history_rows.append(row)
                 file.write(
                     json.dumps(
-                        {
-                            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "media_type": media_type,
-                            "site": detect_site(source_url) if source_url else "",
-                            "url": source_url,
-                            "title": item,
-                        },
+                        row,
                         ensure_ascii=False,
                     )
                     + "\n"
                 )
     except OSError:
+        pass
+
+    if not history_rows:
+        for index, item in enumerate(items):
+            source_url = urls_list[0] if len(urls_list) == 1 else urls_list[index] if len(urls_list) == len(items) else ""
+            history_rows.append(
+                {
+                    "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "media_type": media_type,
+                    "site": detect_site(source_url) if source_url else "",
+                    "url": source_url,
+                    "title": item,
+                }
+            )
+
+    try:
+        init_database()
+        with sqlite3.connect(DATABASE_FILE) as conn:
+            conn.executemany(
+                "INSERT INTO history(created_at, media_type, site, url, title) VALUES(?, ?, ?, ?, ?)",
+                [
+                    (row["date"], row["media_type"], row["site"], row["url"], row["title"])
+                    for row in history_rows
+                ],
+            )
+            conn.commit()
+    except sqlite3.Error:
         return
 
 
 def show_history(limit: int = 15) -> None:
     print()
     print(t("history_title"))
+    try:
+        init_database()
+        with sqlite3.connect(DATABASE_FILE) as conn:
+            rows = conn.execute(
+                "SELECT created_at, media_type, site, title FROM history ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        if rows:
+            for date, media_type, site, title in reversed(rows):
+                print(f"- {date} | {media_type} | {site} | {title}")
+            return
+    except sqlite3.Error:
+        pass
+
     if not HISTORY_FILE.exists():
         print(t("history_empty"))
         return
@@ -864,6 +1039,147 @@ def hash_file(path: Path) -> tuple[str | None, str | None]:
         return None, None
 
 
+def normalize_hex_checksum(value: object, algorithm: str) -> str | None:
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    if ":" in text:
+        prefix, digest = text.split(":", 1)
+        if prefix.strip().lower() == algorithm:
+            text = digest.strip().lower()
+    text = text.strip('"').strip("'")
+    expected_length = 64 if algorithm == "sha256" else 32
+    if re.fullmatch(rf"[0-9a-f]{{{expected_length}}}", text):
+        return text
+    return None
+
+
+def base64_digest_to_hex(value: str) -> str | None:
+    try:
+        return base64.b64decode(value.strip(), validate=True).hex()
+    except Exception:
+        return None
+
+
+def get_header_value(headers: object, name: str) -> str:
+    try:
+        return str(headers.get(name, "") or "")  # type: ignore[attr-defined]
+    except AttributeError:
+        return ""
+
+
+def extract_remote_checksums_from_headers(headers: object) -> dict[str, str]:
+    checksums: dict[str, str] = {}
+
+    md5_hex = normalize_hex_checksum(get_header_value(headers, "Content-MD5"), "md5")
+    if md5_hex is None and get_header_value(headers, "Content-MD5"):
+        md5_hex = base64_digest_to_hex(get_header_value(headers, "Content-MD5"))
+    if md5_hex:
+        checksums["md5"] = md5_hex
+
+    for header_name in ("x-checksum-md5", "x-amz-meta-md5", "x-amz-meta-checksum-md5"):
+        md5_hex = normalize_hex_checksum(get_header_value(headers, header_name), "md5")
+        if md5_hex:
+            checksums["md5"] = md5_hex
+            break
+
+    for header_name in ("x-checksum-sha256", "x-amz-checksum-sha256", "x-amz-meta-sha256", "x-amz-meta-checksum-sha256"):
+        sha256_hex = normalize_hex_checksum(get_header_value(headers, header_name), "sha256")
+        if sha256_hex is None and get_header_value(headers, header_name):
+            decoded = base64_digest_to_hex(get_header_value(headers, header_name))
+            sha256_hex = decoded if decoded and len(decoded) == 64 else None
+        if sha256_hex:
+            checksums["sha256"] = sha256_hex
+            break
+
+    goog_hash = get_header_value(headers, "x-goog-hash")
+    if goog_hash:
+        for part in goog_hash.split(","):
+            key, sep, value = part.strip().partition("=")
+            if sep and key.lower() == "md5":
+                md5_hex = base64_digest_to_hex(value)
+                if md5_hex:
+                    checksums["md5"] = md5_hex
+
+    etag = get_header_value(headers, "ETag").strip('"').lower()
+    if "md5" not in checksums and re.fullmatch(r"[0-9a-f]{32}", etag):
+        checksums["md5"] = etag
+
+    return checksums
+
+
+def register_remote_validation(
+    url: str,
+    *,
+    filename: str | None = None,
+    size: int | None = None,
+    md5: str | None = None,
+    sha256: str | None = None,
+) -> dict[str, object]:
+    checksums: dict[str, str] = {}
+    md5 = normalize_hex_checksum(md5, "md5")
+    sha256 = normalize_hex_checksum(sha256, "sha256")
+    if md5:
+        checksums["md5"] = md5
+    if sha256:
+        checksums["sha256"] = sha256
+    metadata: dict[str, object] = {
+        "url": url,
+        "filename": filename or "",
+        "size_bytes": int(size) if isinstance(size, int) and size > 0 else None,
+        "checksums": checksums,
+    }
+    REMOTE_VALIDATION_BY_URL[url] = metadata
+    return metadata
+
+
+def register_downloaded_file_validation(path: Path, metadata: dict[str, object] | None) -> None:
+    if not metadata:
+        return
+    try:
+        REMOTE_VALIDATION_BY_PATH[str(path.resolve())] = metadata
+    except OSError:
+        REMOTE_VALIDATION_BY_PATH[str(path)] = metadata
+
+
+def get_remote_validation_for_path(path: Path) -> dict[str, object] | None:
+    try:
+        return REMOTE_VALIDATION_BY_PATH.get(str(path.resolve()))
+    except OSError:
+        return REMOTE_VALIDATION_BY_PATH.get(str(path))
+
+
+def remote_validation_status(size_bytes: int, md5: str | None, sha256: str | None, metadata: dict[str, object] | None) -> tuple[str, list[str]]:
+    if not metadata:
+        return "local-only", ["source metadata unavailable"]
+
+    problems: list[str] = []
+    expected_size = metadata.get("size_bytes")
+    if isinstance(expected_size, int) and expected_size > 0 and size_bytes != expected_size:
+        problems.append(f"size mismatch: expected {expected_size} B, got {size_bytes} B")
+
+    checksums = metadata.get("checksums")
+    if isinstance(checksums, dict):
+        expected_md5 = checksums.get("md5")
+        expected_sha256 = checksums.get("sha256")
+        if expected_md5:
+            if not md5:
+                problems.append("MD5 unavailable locally")
+            elif str(expected_md5).lower() != md5.lower():
+                problems.append("MD5 mismatch")
+        if expected_sha256:
+            if not sha256:
+                problems.append("SHA256 unavailable locally")
+            elif str(expected_sha256).lower() != sha256.lower():
+                problems.append("SHA256 mismatch")
+
+    if problems:
+        return "mismatch", problems
+    if (isinstance(expected_size, int) and expected_size > 0) or (isinstance(checksums, dict) and checksums):
+        return "ok", []
+    return "local-only", ["source size/checksum unavailable"]
+
+
 def find_matching_downloaded_file(base_path: Path, item: str) -> Path | None:
     if not item:
         return None
@@ -964,11 +1280,20 @@ def write_validation_report(rows: list[dict[str, object]]) -> Path | None:
             for row in rows:
                 file.write(f"File: {row['path']}\n")
                 file.write(f"Size: {row['size_bytes']} bytes ({row['size_mb']})\n")
+                file.write(f"Source validation: {row.get('remote_status', 'local-only')}\n")
+                if row.get("remote_size_bytes"):
+                    file.write(f"Expected size: {row['remote_size_bytes']} bytes ({row['remote_size_mb']})\n")
                 if row.get("md5") and row.get("sha256"):
                     file.write(f"MD5: {row['md5']}\n")
                     file.write(f"SHA256: {row['sha256']}\n")
                 else:
                     file.write("MD5/SHA256: unavailable\n")
+                if row.get("remote_md5"):
+                    file.write(f"Expected MD5: {row['remote_md5']}\n")
+                if row.get("remote_sha256"):
+                    file.write(f"Expected SHA256: {row['remote_sha256']}\n")
+                for problem in row.get("remote_problems", []):
+                    file.write(f"Validation problem: {problem}\n")
                 file.write("\n")
         return report_path
     except OSError:
@@ -983,6 +1308,18 @@ def build_file_validation_rows(saved_path: Path, saved_items: Iterable[str]) -> 
         except OSError:
             continue
         md5, sha256 = hash_file(path)
+        remote_metadata = get_remote_validation_for_path(path)
+        remote_status, remote_problems = remote_validation_status(size_bytes, md5, sha256, remote_metadata)
+        remote_size = None
+        remote_md5 = None
+        remote_sha256 = None
+        if remote_metadata:
+            raw_remote_size = remote_metadata.get("size_bytes")
+            remote_size = raw_remote_size if isinstance(raw_remote_size, int) and raw_remote_size > 0 else None
+            checksums = remote_metadata.get("checksums")
+            if isinstance(checksums, dict):
+                remote_md5 = checksums.get("md5")
+                remote_sha256 = checksums.get("sha256")
         rows.append(
             {
                 "path": str(path),
@@ -991,6 +1328,12 @@ def build_file_validation_rows(saved_path: Path, saved_items: Iterable[str]) -> 
                 "size_mb": format_mb(size_bytes),
                 "md5": md5,
                 "sha256": sha256,
+                "remote_status": remote_status,
+                "remote_problems": remote_problems,
+                "remote_size_bytes": remote_size,
+                "remote_size_mb": format_mb(remote_size) if remote_size else "",
+                "remote_md5": remote_md5,
+                "remote_sha256": remote_sha256,
             }
         )
     return rows
@@ -1007,11 +1350,20 @@ def print_file_validation(saved_path: Path, saved_items: Iterable[str]) -> None:
     for row in rows[:preview_limit]:
         print(f"- {row['name']}")
         print(f"  {t('validation_size')}: {row['size_mb']} ({row['size_bytes']} B)")
+        print(f"  Source check: {row.get('remote_status', 'local-only')}")
+        if row.get("remote_size_bytes"):
+            print(f"  Expected size: {row['remote_size_mb']} ({row['remote_size_bytes']} B)")
         if row.get("md5") and row.get("sha256"):
             print(f"  MD5: {row['md5']}")
             print(f"  SHA256: {row['sha256']}")
         else:
             print(f"  {t('validation_hash_unavailable')}")
+        if row.get("remote_md5"):
+            print(f"  Expected MD5: {row['remote_md5']}")
+        if row.get("remote_sha256"):
+            print(f"  Expected SHA256: {row['remote_sha256']}")
+        for problem in row.get("remote_problems", []):
+            print(f"  Validation problem: {problem}")
     if len(rows) > preview_limit:
         print(t("saved_more", count=len(rows) - preview_limit))
 
@@ -1319,33 +1671,6 @@ def decode_snake_scoreboard(raw_value: str) -> tuple[int, int] | None:
     return best, total
 
 
-def load_embedded_download_count() -> int | None:
-    return decode_download_count(_N0R_FF)
-
-
-def save_embedded_download_count(value: int) -> bool:
-    global _N0R_FF
-    encoded = encode_download_count(value)
-    program_file = Path(__file__).resolve()
-    try:
-        clear_hidden_file(program_file)
-        text = program_file.read_text(encoding="utf-8")
-        new_text, replacements = re.subn(
-            r'^_N0R_FF = "[0-9a-fA-F]{8}"',
-            f'_N0R_FF = "{encoded}"',
-            text,
-            count=1,
-            flags=re.MULTILINE,
-        )
-        if replacements != 1:
-            return False
-        program_file.write_text(new_text, encoding="utf-8")
-        _N0R_FF = encoded
-        return True
-    except OSError:
-        return False
-
-
 def load_embedded_snake_scoreboard() -> tuple[int, int] | None:
     return decode_snake_scoreboard(_SNEK_FF)
 
@@ -1373,24 +1698,12 @@ def save_embedded_snake_scoreboard(best_score: int, total_score: int) -> bool:
         return False
 
 
-def get_existing_stats_file() -> Path:
-    if LOCAL_DOWNLOAD_STATS_FILE.exists():
-        return LOCAL_DOWNLOAD_STATS_FILE
-    if DOWNLOAD_STATS_FILE.exists():
-        return DOWNLOAD_STATS_FILE
-    if FALLBACK_DOWNLOAD_STATS_FILE.exists():
-        return FALLBACK_DOWNLOAD_STATS_FILE
-    return LOCAL_DOWNLOAD_STATS_FILE
-
-
-def get_existing_breakdown_file() -> Path:
-    if LOCAL_DOWNLOAD_BREAKDOWN_FILE.exists():
-        return LOCAL_DOWNLOAD_BREAKDOWN_FILE
-    if DOWNLOAD_BREAKDOWN_FILE.exists():
-        return DOWNLOAD_BREAKDOWN_FILE
-    if FALLBACK_DOWNLOAD_BREAKDOWN_FILE.exists():
-        return FALLBACK_DOWNLOAD_BREAKDOWN_FILE
-    return LOCAL_DOWNLOAD_BREAKDOWN_FILE
+def get_existing_stats_config_file() -> Path:
+    if STATS_CONFIG_FILE.exists():
+        return STATS_CONFIG_FILE
+    if LOCAL_STATS_CONFIG_FILE.exists():
+        return LOCAL_STATS_CONFIG_FILE
+    return STATS_CONFIG_FILE
 
 
 def get_existing_snake_stats_file() -> Path:
@@ -1403,25 +1716,67 @@ def get_existing_snake_stats_file() -> Path:
     return LOCAL_SNAKE_STATS_FILE
 
 
-def load_stats_file_count() -> int:
+def get_default_stats_config_data() -> dict[str, object]:
+    return {
+        "download_count": encode_download_count(0),
+        "download_breakdown": encode_download_breakdown(default_download_breakdown(0)),
+    }
+
+
+def read_stats_config() -> dict[str, object]:
+    db_stats = db_get_json("stats")
+    if db_stats:
+        return db_stats
     try:
-        stats_file = get_existing_stats_file()
-        if not stats_file.exists():
-            return 0
+        stats_file = get_existing_stats_config_file()
+        if stats_file.exists():
+            data = json.loads(stats_file.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return get_default_stats_config_data()
 
-        raw_value = stats_file.read_text(encoding="utf-8").strip()
-        if not raw_value.isdigit():
-            save_download_count(0)
-            return 0
 
-        value = int(raw_value)
-        if value < 0 or value > MAX_REASONABLE_DOWNLOAD_COUNT:
-            save_download_count(0)
-            return 0
+def write_stats_config(data: dict[str, object]) -> None:
+    safe_data = {
+        "download_count": encode_download_count(decode_download_count(str(data.get("download_count", ""))) or 0),
+        "download_breakdown": encode_download_breakdown(
+            decode_download_breakdown(str(data.get("download_breakdown", ""))) or default_download_breakdown(0)
+        ),
+    }
+    db_set_json("stats", safe_data)
+    for stats_file in (STATS_CONFIG_FILE, LOCAL_STATS_CONFIG_FILE):
+        try:
+            stats_file.parent.mkdir(parents=True, exist_ok=True)
+            stats_file.write_text(json.dumps(safe_data, indent=2), encoding="utf-8")
+            return
+        except OSError:
+            continue
 
-        return value
+
+def load_legacy_user_stats_count() -> int:
+    try:
+        if LEGACY_DOWNLOAD_STATS_FILE.exists():
+            raw_value = LEGACY_DOWNLOAD_STATS_FILE.read_text(encoding="utf-8").strip()
+            if raw_value.isdigit():
+                value = int(raw_value)
+                if 0 <= value <= MAX_REASONABLE_DOWNLOAD_COUNT:
+                    return value
     except OSError:
-        return 0
+        pass
+    return 0
+
+
+def load_legacy_user_breakdown(fallback_total: int) -> dict[str, int]:
+    try:
+        if LEGACY_DOWNLOAD_BREAKDOWN_FILE.exists():
+            value = decode_download_breakdown(LEGACY_DOWNLOAD_BREAKDOWN_FILE.read_text(encoding="utf-8"))
+            if value is not None:
+                return normalize_download_breakdown(value, fallback_total)
+    except OSError:
+        pass
+    return default_download_breakdown(fallback_total)
 
 
 def load_snake_stats_file() -> tuple[int, int]:
@@ -1440,27 +1795,22 @@ def load_snake_stats_file() -> tuple[int, int]:
 
 
 def load_download_breakdown() -> dict[str, int]:
-    fallback_total = load_download_count()
-    try:
-        breakdown_file = get_existing_breakdown_file()
-        if not breakdown_file.exists():
-            return default_download_breakdown(fallback_total)
-
-        value = decode_download_breakdown(breakdown_file.read_text(encoding="utf-8"))
-        if value is None:
-            save_download_breakdown(default_download_breakdown(fallback_total))
-            return default_download_breakdown(fallback_total)
-        return normalize_download_breakdown(value, fallback_total)
-    except OSError:
-        return default_download_breakdown(fallback_total)
+    data = read_stats_config()
+    fallback_total = decode_download_count(str(data.get("download_count", ""))) or 0
+    value = decode_download_breakdown(str(data.get("download_breakdown", "")))
+    if value is None:
+        value = load_legacy_user_breakdown(fallback_total)
+        save_download_breakdown(value)
+    return normalize_download_breakdown(value, fallback_total)
 
 
 def load_download_count() -> int:
-    embedded_count = load_embedded_download_count()
-    stats_count = load_stats_file_count()
-    if embedded_count is None:
-        return stats_count
-    return max(embedded_count, stats_count)
+    data = read_stats_config()
+    value = decode_download_count(str(data.get("download_count", "")))
+    if value is None:
+        value = load_legacy_user_stats_count()
+        save_download_count(value)
+    return value
 
 
 def load_snake_scoreboard() -> tuple[int, int]:
@@ -1475,9 +1825,9 @@ def load_snake_scoreboard() -> tuple[int, int]:
 
 def ensure_download_stats_file() -> None:
     count = load_download_count()
-    save_download_count(count)
     breakdown = load_download_breakdown()
     breakdown["total"] = max(breakdown["total"], count)
+    save_download_count(max(count, breakdown["total"]))
     save_download_breakdown(breakdown)
 
 
@@ -1488,32 +1838,20 @@ def ensure_snake_scoreboard_file() -> None:
 
 def save_download_count(value: int) -> None:
     safe_value = max(0, min(int(value), MAX_REASONABLE_DOWNLOAD_COUNT))
-    if save_embedded_download_count(safe_value):
-        return
-
-    for stats_file in (LOCAL_DOWNLOAD_STATS_FILE, DOWNLOAD_STATS_FILE, FALLBACK_DOWNLOAD_STATS_FILE):
-        try:
-            stats_file.parent.mkdir(parents=True, exist_ok=True)
-            clear_hidden_file(stats_file)
-            stats_file.write_text(str(safe_value), encoding="utf-8")
-            ensure_hidden_file(stats_file)
-            return
-        except OSError:
-            continue
+    data = read_stats_config()
+    data["download_count"] = encode_download_count(safe_value)
+    if "download_breakdown" not in data:
+        data["download_breakdown"] = encode_download_breakdown(default_download_breakdown(safe_value))
+    write_stats_config(data)
 
 
 def save_download_breakdown(data: dict[str, int]) -> None:
     normalized = normalize_download_breakdown(data, load_download_count())
     encoded = encode_download_breakdown(normalized)
-    for stats_file in (LOCAL_DOWNLOAD_BREAKDOWN_FILE, DOWNLOAD_BREAKDOWN_FILE, FALLBACK_DOWNLOAD_BREAKDOWN_FILE):
-        try:
-            stats_file.parent.mkdir(parents=True, exist_ok=True)
-            clear_hidden_file(stats_file)
-            stats_file.write_text(encoded, encoding="utf-8")
-            ensure_hidden_file(stats_file)
-            return
-        except OSError:
-            continue
+    stats_data = read_stats_config()
+    stats_data["download_count"] = encode_download_count(normalized["total"])
+    stats_data["download_breakdown"] = encoded
+    write_stats_config(stats_data)
 
 
 def save_snake_scoreboard(best_score: int, total_score: int) -> None:
@@ -1629,6 +1967,7 @@ def ask_url_or_quit(prompt: str) -> str | None:
         if value.lower() in {"q", "quit", "koniec"}:
             return None
 
+        value = normalize_user_url(value)
         error = validate_url(value)
         if error is None:
             return value
@@ -1638,7 +1977,7 @@ def ask_url_or_quit(prompt: str) -> str | None:
 
 def ask_url(prompt: str) -> str:
     while True:
-        value = ask_non_empty(prompt)
+        value = normalize_user_url(ask_non_empty(prompt))
         error = validate_url(value)
         if error is None:
             return value
@@ -1686,7 +2025,7 @@ def read_urls_from_txt(file_path: str) -> list[str]:
         ) from exc
 
     for line in text.splitlines():
-        clean = line.strip()
+        clean = normalize_user_url(line.strip())
         if clean and not clean.startswith("#"):
             url_error = validate_url(clean)
             if url_error is not None:
@@ -1700,8 +2039,61 @@ def read_urls_from_txt(file_path: str) -> list[str]:
 
 
 def looks_like_url(value: str) -> bool:
-    parsed = urlparse(value)
+    parsed = urlparse(normalize_user_url(value))
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def normalize_user_url(value: str) -> str:
+    clean = value.strip().strip('"')
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", clean):
+        return clean
+    lowered = clean.lower()
+    known_prefixes = (
+        "youtube.com/",
+        "youtu.be/",
+        "instagram.com/",
+        "tiktok.com/",
+        "facebook.com/",
+        "fb.com/",
+        "fb.watch/",
+        "github.com/",
+        "mega.nz/",
+        "drive.google.com/",
+        "open.spotify.com/",
+        "onlyfans.com/",
+        "pornhub.com/",
+        "beeg.com/",
+    )
+    if lowered.startswith(known_prefixes) or lowered.startswith("www."):
+        return "https://" + clean
+    return clean
+
+
+def extract_links_from_html(html: str, base_url: str) -> list[str]:
+    if BeautifulSoup is None:
+        return []
+    try:
+        soup = BeautifulSoup(html, "lxml" if lxml is not None else "html.parser")
+    except Exception:
+        return []
+    links: list[str] = []
+    seen: set[str] = set()
+    for tag in soup.find_all(["a", "source", "video", "img"]):
+        for attribute in ("href", "src"):
+            raw_value = tag.get(attribute)
+            if not raw_value:
+                continue
+            link = str(raw_value).strip()
+            if link.startswith("//"):
+                link = urlparse(base_url).scheme + ":" + link
+            elif link.startswith("/"):
+                parsed = urlparse(base_url)
+                link = f"{parsed.scheme}://{parsed.netloc}{link}"
+            link = normalize_user_url(link)
+            if looks_like_url(link) and link not in seen:
+                seen.add(link)
+                links.append(link)
+    return links
 
 
 def is_youtube_channel_url(url: str) -> bool:
@@ -1740,6 +2132,7 @@ def parse_download_input(raw_value: str) -> tuple[list[str], str]:
         urls = []
         invalid_tokens = []
         for token in tokens:
+            token = normalize_user_url(token)
             url_error = validate_url(token)
             if url_error is None:
                 urls.append(token)
@@ -1877,6 +2270,7 @@ def parse_large_file_input(raw_value: str) -> list[str]:
         invalid_tokens = []
         tokens = [item.strip().strip(",;") for item in re.split(r"[\s,;]+", value) if item.strip().strip(",;")]
         for token in tokens:
+            token = normalize_user_url(token)
             url_error = validate_url(token)
             if url_error is not None:
                 invalid_tokens.append(f"{token} ({url_error})")
@@ -1911,11 +2305,16 @@ def get_latest_github_release_assets(repo_url: str) -> list[dict[str, object]]:
         asset_name = str(asset.get("name") or "")
         asset_url = str(asset.get("browser_download_url") or "")
         if asset_name and asset_url:
+            digest = str(asset.get("digest") or "")
+            sha256 = normalize_hex_checksum(digest, "sha256")
+            size = int(asset.get("size") or 0)
+            register_remote_validation(asset_url, filename=asset_name, size=size, sha256=sha256)
             assets.append(
                 {
                     "name": asset_name,
                     "url": asset_url,
-                    "size": int(asset.get("size") or 0),
+                    "size": size,
+                    "sha256": sha256 or "",
                 }
             )
     return assets
@@ -2042,15 +2441,34 @@ def get_pending_large_file_queue_count() -> int:
     return (1 if current else 0) + len(queue)
 
 
-def get_remote_file_info(url: str) -> tuple[int | None, str | None]:
+def get_remote_file_metadata(url: str) -> dict[str, object]:
     request = Request(url, method="HEAD", headers={"User-Agent": "VideoDownloader"})
     try:
         with urlopen(request, timeout=20) as response:
             length = response.headers.get("Content-Length")
             filename = filename_from_response_or_url(url, response.headers)
-            return int(length) if length and length.isdigit() else None, filename
+            size = int(length) if length and length.isdigit() else None
+            checksums = extract_remote_checksums_from_headers(response.headers)
+            metadata = register_remote_validation(
+                url,
+                filename=filename,
+                size=size,
+                md5=checksums.get("md5"),
+                sha256=checksums.get("sha256"),
+            )
+            return metadata
     except Exception:
-        return None, None
+        return REMOTE_VALIDATION_BY_URL.get(url) or register_remote_validation(url)
+
+
+def get_remote_file_info(url: str) -> tuple[int | None, str | None]:
+    metadata = get_remote_file_metadata(url)
+    size = metadata.get("size_bytes")
+    filename = metadata.get("filename")
+    return (
+        size if isinstance(size, int) else None,
+        str(filename) if filename else None,
+    )
 
 
 def ensure_enough_space(download_dir: Path, required_bytes: int | None, existing_bytes: int = 0) -> None:
@@ -2128,7 +2546,11 @@ def download_large_file(
     remaining_queue: Iterable[str] | None = None,
     persist_queue: bool = True,
 ) -> tuple[str, Path] | None:
-    total_size, remote_name = get_remote_file_info(url)
+    remote_metadata = get_remote_file_metadata(url)
+    total_size = remote_metadata.get("size_bytes")
+    total_size = total_size if isinstance(total_size, int) else None
+    remote_name = remote_metadata.get("filename")
+    remote_name = str(remote_name) if remote_name else None
     filename = remote_name or filename_from_response_or_url(url)
     target = download_dir / filename
     partial = download_dir / f"{filename}.part"
@@ -2182,6 +2604,7 @@ def download_large_file(
             if total_size is not None and downloaded < total_size:
                 raise URLError(f"Incomplete download: {downloaded}/{total_size}")
             partial.replace(target)
+            register_downloaded_file_validation(target, remote_metadata)
             print(t("file_done", name=filename))
             return filename, download_dir
         except (HTTPError, URLError, TimeoutError, OSError) as exc:
@@ -2331,7 +2754,7 @@ def resume_large_file_queue() -> None:
 
 
 def validate_url(value: str) -> str | None:
-    clean = value.strip().strip('"')
+    clean = normalize_user_url(value)
     if not clean:
         return "link nie moze byc pusty."
     if any(char.isspace() for char in clean):
@@ -2378,6 +2801,14 @@ def is_facebook_url(url: str) -> bool:
     return host in {"facebook.com", "fb.com", "fb.watch"} or host.endswith(".facebook.com")
 
 
+def is_facebook_reel_url(url: str) -> bool:
+    parsed = urlparse(normalize_user_url(url))
+    host = parsed.netloc.lower().removeprefix("www.")
+    if host not in {"facebook.com", "m.facebook.com", "fb.com"} and not host.endswith(".facebook.com"):
+        return False
+    return parsed.path.strip("/").startswith("reel/")
+
+
 def is_onlyfans_url(url: str) -> bool:
     host = urlparse(url).netloc.lower().removeprefix("www.")
     return host == "onlyfans.com" or host.endswith(".onlyfans.com")
@@ -2422,6 +2853,28 @@ def load_cookie_header_from_file(cookie_file: str, url: str) -> str:
     for cookie in jar:
         cookie_domain = cookie.domain.lower().lstrip(".")
         if host == cookie_domain or host.endswith(f".{cookie_domain}"):
+            pairs.append(f"{cookie.name}={cookie.value}")
+    return "; ".join(pairs)
+
+
+def load_cookie_header_from_browser(browser: str, url: str) -> str:
+    if browser_cookie3 is None or not browser:
+        return ""
+    loader = getattr(browser_cookie3, browser.lower(), None)
+    if loader is None:
+        return ""
+    try:
+        jar = loader(domain_name=urlparse(url).netloc)
+    except Exception:
+        try:
+            jar = browser_cookie3.load(domain_name=urlparse(url).netloc)
+        except Exception:
+            return ""
+    host = urlparse(url).netloc.lower()
+    pairs: list[str] = []
+    for cookie in jar:
+        cookie_domain = str(getattr(cookie, "domain", "")).lower().lstrip(".")
+        if cookie_domain and (host == cookie_domain or host.endswith(f".{cookie_domain}")):
             pairs.append(f"{cookie.name}={cookie.value}")
     return "; ".join(pairs)
 
@@ -3150,6 +3603,11 @@ def apply_cookie_options(options: dict, url: str | None) -> None:
         browser = FACEBOOK_COOKIES_FROM_BROWSER.strip().lower()
         if browser:
             options["cookiesfrombrowser"] = (browser, None, None, None)
+            cookie_header = load_cookie_header_from_browser(browser, url)
+            if cookie_header:
+                headers = dict(options.get("http_headers", {}))
+                headers["Cookie"] = cookie_header
+                options["http_headers"] = headers
 
 
 def has_ffmpeg() -> bool:
@@ -3228,6 +3686,10 @@ def show_spotdl_help() -> None:
 def show_ofscraper_help() -> None:
     print()
     print(t("ofscraper_missing"))
+
+
+def can_write_mp3_metadata() -> bool:
+    return mutagen is not None
 
 
 def get_ofscraper_command() -> list[str] | None:
@@ -3338,12 +3800,22 @@ def download_onlyfans_direct_media(urls: Iterable[str], download_dir: Path) -> l
                 headers["Cookie"] = cookie_header
             request = Request(url, headers=headers)
             with urlopen(request, timeout=30) as response:
+                length = response.headers.get("Content-Length")
+                remote_checksums = extract_remote_checksums_from_headers(response.headers)
+                remote_metadata = register_remote_validation(
+                    url,
+                    filename=filename,
+                    size=int(length) if length and length.isdigit() else None,
+                    md5=remote_checksums.get("md5"),
+                    sha256=remote_checksums.get("sha256"),
+                )
                 with target.open("wb") as output:
                     while True:
                         chunk = response.read(1024 * 512)
                         if not chunk:
                             break
                         output.write(chunk)
+            register_downloaded_file_validation(target, remote_metadata)
             add_downloaded_files(1)
             saved_items.append(filename)
             print(t("status_success"))
@@ -3722,9 +4194,10 @@ def run_download_flow() -> None:
 
 def main() -> None:
     load_config()
+    init_database()
     ensure_download_stats_file()
     ensure_snake_scoreboard_file()
-    print(t("app_title", version=APP_VERSION))
+    print_app_header()
     if not ensure_internet_or_offline_mode():
         print(t("program_no_internet"))
         return
@@ -3732,7 +4205,7 @@ def main() -> None:
     try:
         while True:
             clear_console()
-            print(t("app_title", version=APP_VERSION))
+            print_app_header()
             print()
             print(get_download_counter_text())
             pending_queue_count = get_pending_large_file_queue_count()

@@ -1,8 +1,8 @@
 # Changelog
 
-## v2.1
+## v2.5
 
-Focused polish release for updater safety, installer wording and playlist handling.
+Release prepared for GitHub with a cleaner installer, safer update flow, neutral public configuration and new foundations for a modern interface and local data storage.
 
 ### Added
 
@@ -11,10 +11,16 @@ Focused polish release for updater safety, installer wording and playlist handli
 - Added YouTube playlist preflight with detected item count, estimated size and confirmation before downloading all items.
 - Added `q` stop control during active yt-dlp downloads.
 - Added persistent PowerShell bootstrap logs in `%TEMP%\VideoDownloaderInstallLogs\install_ps1_latest.log`.
+- Added source-vs-local validation for large/direct file downloads: expected size and MD5/SHA256 are compared with the downloaded file when the source exposes them.
+- Added Facebook Reels video URL handling, including links pasted as `facebook.com/reel/...` without `https://`.
+- Added neutral `config/stats.json` for download counters so public GitHub copies no longer inherit the author's local counter.
+- Added Rich/Textual dependencies and Rich-powered terminal header fallback.
+- Added SQLite storage foundation for user configuration, statistics, counters and history.
+- Added `browser-cookie3`, BeautifulSoup/lxml and mutagen foundations for browser cookies, HTML link extraction and MP3 metadata/cover-art tagging.
 
 ### Changed
 
-- App version is now `v2.1`.
+- App version is now `v2.5`.
 - Installer step text now says `Downloading application files` instead of `Downloading program files`.
 - Installer progress now shows step percent and overall percent, and installed components are reported as already installed, installed, or checked for updates.
 - Installer package progress now displays separate step and overall progress bars.
@@ -25,6 +31,8 @@ Focused polish release for updater safety, installer wording and playlist handli
 - PowerShell bootstrap now defaults to downloading the AIO installer from the selected branch, with `-DownloadMode release` available when a release-based install is desired.
 - PowerShell bootstrap now logs failures before closing and pauses when launched from a local `.ps1` file.
 - Improved menu navigation by clearing previous screens and adding back options in download submenus.
+- Download counters are now stored in user/config stats data instead of being embedded in `youtube_downloader.py`.
+- Installer now verifies UI/helper libraries as a dedicated dependency step.
 
 ### Fixed
 
@@ -34,6 +42,8 @@ Focused polish release for updater safety, installer wording and playlist handli
 - Fixed `PermissionError` on local package imports from `C:\Program Files\VideoDownloader\python_packages` by granting standard users read permissions during installation.
 - Fixed AIO GitHub downloads hitting `429 Too Many Requests` by downloading the repository as a single ZIP archive instead of many raw files.
 - Fixed PowerShell bootstrap treating administrator hand-off as a failed installer run.
+- Fixed one-command install flow so the PowerShell bootstrap opens the AIO installer directly in an administrator window and stops installing in the standard-user shell.
+- Fixed AIO installer continuing in the non-admin window after launching the administrator window.
 - Fixed OF-Scraper detection by checking the dedicated `tools/ofscraper_python/python.exe -m ofscraper` command.
 - Fixed shortcut creation by adding fallback Desktop/Start Menu paths and auto-creating the launcher when possible.
 - Fixed `install.ps1` log/file writing to avoid BOM issues in generated batch files and to report AIO installer exit-code failures clearly.

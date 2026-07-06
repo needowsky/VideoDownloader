@@ -2,7 +2,7 @@
 
 Windows console downloader written in Python.
 
-Current version: `v2.1`
+Current version: `v2.5`
 
 Repository: https://github.com/needowsky/VideoDownloader
 
@@ -16,7 +16,7 @@ Run this in PowerShell:
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/needowsky/VideoDownloader/main/install.ps1 | iex"
 ```
 
-This downloads the full AIO installer from GitHub, applies settings and launches dependency setup. The installer then downloads or verifies Python, pip, Microsoft C++ Build Tools, FFmpeg, `yt-dlp`, `gallery-dl`, `spotDL` and `OF-Scraper`.
+This downloads the full AIO installer from GitHub, applies settings and launches dependency setup. The installer then downloads or verifies Python, pip, Microsoft C++ Build Tools, FFmpeg, `yt-dlp`, `gallery-dl`, `spotDL`, `OF-Scraper`, Rich/Textual UI helpers, `browser-cookie3`, BeautifulSoup/lxml and `mutagen`.
 
 By default, the PowerShell bootstrap downloads the AIO installer from the `main` branch. To force the newest GitHub release instead, run:
 
@@ -43,6 +43,7 @@ Use it only for content you own, content you are allowed to download, or content
 - Automatic input detection for single links, multiple links, YouTube playlists, YouTube channels and `.txt` files.
 - YouTube playlist/channel preflight with item count, estimated size and confirmation.
 - Instagram, TikTok and Facebook photo downloads through `gallery-dl`.
+- Facebook Reels video links through `yt-dlp`, including `facebook.com/reel/...` pasted without `https://`.
 - Spotify mode through `spotDL` metadata matching with YouTube/YouTube Music.
 - Authorized OnlyFans workflows through direct media links or optional OF-Scraper integration.
 - Naughties/adult video sources supported by `yt-dlp`, including Pornhub, Beeg and similar sites.
@@ -51,10 +52,16 @@ Use it only for content you own, content you are allowed to download, or content
 - `.part` resume, retry handling and queue recovery for large downloads.
 - Disk-full recovery by moving partial downloads to another folder when possible.
 - Clean progress display with title, progress bar, percent, downloaded MB and speed.
-- File validation after download: size, MD5 and SHA256 when available.
+- Rich-powered terminal header when available, with Textual included as the foundation for a future full TUI.
+- SQLite user database for configuration, statistics, counters and history.
+- Browser cookie access through `browser-cookie3` for sites that require logged-in sessions.
+- BeautifulSoup/lxml helpers for extracting media links from HTML pages.
+- Mutagen dependency prepared for MP3 metadata and cover-art tagging.
+- File validation after download: compares downloaded file size and MD5/SHA256 against source metadata when the source provides it; otherwise reports local size and hashes.
 - Error logs with recognized error type, reason and repair hint.
 - English/Polish interface through `config/lang/*.lang`.
 - Runtime settings in `config/config.json`.
+- User download counters in `config/stats.json` / user config data, not embedded in source code.
 - Commands: `help`, `stats`, `stats naughties`, `sites`, `settings`, `update`, `history`, `about`, `doctor`, `open downloads`, `open logs`, `ping`, `resume`.
 
 ## Manual Install
@@ -72,7 +79,7 @@ The installer:
 - creates shortcuts named `Video Downloader` on the Desktop and in the Start Menu,
 - downloads app files from GitHub releases,
 - checks whether components are already installed before downloading them,
-- installs or verifies Python, pip, Microsoft C++ Build Tools, FFmpeg, `yt-dlp`, `gallery-dl`, `spotDL` and `OF-Scraper`,
+- installs or verifies Python, pip, Microsoft C++ Build Tools, FFmpeg, `yt-dlp`, `gallery-dl`, `spotDL`, `OF-Scraper`, Rich/Textual, `browser-cookie3`, BeautifulSoup/lxml and `mutagen`,
 - uses portable Python 3.12 inside the app folder when a compatible Python is missing or broken; it does not install Python globally,
 - installs `OF-Scraper` in its own portable Python environment to avoid dependency conflicts with `spotDL`,
 - shows step progress and overall progress, including already-installed and update-check statuses,
@@ -105,8 +112,10 @@ README.md
 CHANGELOG.md
 LICENSE
 config/config.json
+config/stats.json
 config/lang/en.lang
 config/lang/pl.lang
+User database: `%APPDATA%\VideoDownloader\config\app.db`
 ```
 
 ## Usage
@@ -128,8 +137,9 @@ After a completed download, the app clears the console and shows:
 
 - saved items,
 - file validation,
-- size,
-- MD5/SHA256 when available,
+- source-vs-local size check when available,
+- source-vs-local MD5/SHA256 check when the source provides checksums,
+- local size and MD5/SHA256 when source checksums are unavailable,
 - clickable save folder link in Windows Terminal.
 
 Validation reports are appended to:
