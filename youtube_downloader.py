@@ -215,6 +215,12 @@ FALLBACK_TEXTS = {
         "exit_prompt": "Press Enter to close the window...",
         "hqporner_resolved": "Alternative media player found. Downloading direct media link.",
         "hqporner_resolve_failed": "Alternative media player check failed: {error}",
+        "duplicate_detected": "A file with the same name already existed. The new download was saved with a number at the end.",
+        "duplicate_action": "What should happen with the newly downloaded duplicate?",
+        "duplicate_keep": "Keep the new numbered file",
+        "duplicate_delete": "Delete the new numbered file",
+        "duplicate_kept": "Duplicate file kept.",
+        "duplicate_deleted": "Deleted duplicate files: {count}",
     }
 }
 
@@ -374,11 +380,11 @@ def t(key: str, **kwargs: object) -> str:
     value = language_data.get(key)
     if value is None:
         value = fallback_language.get(key)
+    if value is None:
         report_language_problem(
             f"missing-translation:{lang}:{key}",
             f"Missing translation key '{key}' in language '{lang}'.",
         )
-    if value is None:
         value = get_language_pack_help(f"missing translation key '{key}'")
     try:
         return value.format(**kwargs)
