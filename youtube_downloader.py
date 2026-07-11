@@ -24,7 +24,7 @@ import webbrowser
 from http.cookiejar import MozillaCookieJar
 from typing import Iterable
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urljoin, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 
@@ -188,7 +188,7 @@ STATUS_LINE_WIDTH = 72
 STATUS_TITLE_WIDTH = 22
 STATUS_CLEAR_SEQUENCE = "\033[2K\r"
 STATUS_BLOCK_LINES = 0
-LOG_DIR = Path("logs")
+LOG_DIR = APP_DATA_DIR / "logs"
 ERROR_LOG_FILE = LOG_DIR / "log_error_data.txt"
 COMMON_ERROR_HINTS = [
     "Brak FFmpeg/FFprobe - zainstaluj FFmpeg i uruchom program ponownie.",
@@ -202,6 +202,7 @@ COMMON_ERROR_HINTS = [
 ]
 
 TEXTS: dict[str, dict[str, str]] = {}
+LANGUAGE_WARNING_KEYS: set[str] = set()
 FALLBACK_TEXTS = {
     "en": {
         "choose_option": "Choose option: ",
@@ -212,8 +213,60 @@ FALLBACK_TEXTS = {
         "reason": "Reason: {value}",
         "how_to_fix": "How to fix: {value}",
         "exit_prompt": "Press Enter to close the window...",
+        "hqporner_resolved": "Alternative media player found. Downloading direct media link.",
+        "hqporner_resolve_failed": "Alternative media player check failed: {error}",
     }
 }
+
+
+def get_language_pack_help(reason: str) -> str:
+    return (
+        f"Missing or broken language pack: {reason}. "
+        f"Download the newest language files from GitHub: "
+        f"https://github.com/{GITHUB_REPO}/releases/latest "
+        "or run update / reinstall the application."
+    )
+
+
+def get_error_log_file() -> Path:
+    temp_root = Path(os.environ.get("TEMP", str(APP_DATA_DIR)))
+    candidates = [
+        ERROR_LOG_FILE,
+        APP_DATA_DIR / "logs" / "log_error_data.txt",
+        temp_root / "VideoDownloaderLogs" / "log_error_data.txt",
+    ]
+    for path in candidates:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8"):
+                pass
+            return path
+        except OSError:
+            continue
+    return Path("log_error_data.txt")
+
+
+def write_language_error_log(message: str) -> None:
+    try:
+        log_file = get_error_log_file()
+        with log_file.open("a", encoding="utf-8") as file:
+            file.write(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]\n")
+            file.write("Error type: Missing or broken language pack\n")
+            file.write(f"Reason: {message}\n")
+            file.write(
+                f"How to fix: Download the newest release from https://github.com/{GITHUB_REPO}/releases/latest "
+                "or run the updater/installer again.\n"
+            )
+    except OSError:
+        pass
+
+
+def report_language_problem(identifier: str, message: str) -> None:
+    if identifier in LANGUAGE_WARNING_KEYS:
+        return
+    LANGUAGE_WARNING_KEYS.add(identifier)
+    print(get_language_pack_help(message))
+    write_language_error_log(message)
 
 
 def validate_language_data(data: object, language_name: str) -> dict[str, str]:
@@ -244,21 +297,32 @@ def load_language_file(path: Path) -> tuple[str, dict[str, str]]:
 def load_language_files() -> None:
     TEXTS.clear()
     errors: list[str] = []
+    found_language_files = 0
     for directory in (LANG_DIR, APP_LANG_DIR):
         if not directory.exists():
             continue
         for path in sorted(directory.glob("*.lang")):
+            found_language_files += 1
             try:
                 language_name, data = load_language_file(path)
-                TEXTS[language_name] = data
+                if language_name in TEXTS:
+                    TEXTS[language_name].update(data)
+                else:
+                    TEXTS[language_name] = data
             except Exception as exc:
                 errors.append(f"{path}: {exc}")
 
     if "en" not in TEXTS:
         TEXTS.update(FALLBACK_TEXTS)
+        reason = "English fallback language pack was not found or could not be loaded."
+        if found_language_files == 0:
+            reason = "No .lang files were found in config/lang."
+        report_language_problem("missing-en-language-pack", reason)
 
     for error in errors:
-        print(f"Language file error: {error}")
+        report_language_problem(f"language-file-error:{error}", error)
+
+    validate_loaded_language_packs()
 
 
 def get_available_languages() -> list[str]:
@@ -267,21 +331,82 @@ def get_available_languages() -> list[str]:
     return sorted(TEXTS)
 
 
+def get_format_placeholders(value: str) -> set[str]:
+    return set(re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", value))
+
+
+def validate_loaded_language_packs() -> None:
+    reference = TEXTS.get("en")
+    if not reference:
+        return
+
+    reference_keys = set(reference)
+    for language_name, translations in TEXTS.items():
+        missing_keys = sorted(reference_keys - set(translations))
+        if missing_keys:
+            preview = ", ".join(missing_keys[:12])
+            if len(missing_keys) > 12:
+                preview += f", ... (+{len(missing_keys) - 12})"
+            report_language_problem(
+                f"missing-language-keys:{language_name}",
+                f"Language '{language_name}' is missing {len(missing_keys)} translation key(s): {preview}.",
+            )
+
+        for key in sorted(reference_keys & set(translations)):
+            expected = get_format_placeholders(reference[key])
+            actual = get_format_placeholders(translations[key])
+            if expected != actual:
+                report_language_problem(
+                    f"language-placeholders:{language_name}:{key}",
+                    f"Language '{language_name}' key '{key}' has placeholders {sorted(actual)}, expected {sorted(expected)}.",
+                )
+
+
 def t(key: str, **kwargs: object) -> str:
     if not TEXTS:
         load_language_files()
     lang = LANG.lower()
     if lang not in TEXTS:
+        report_language_problem(f"missing-language:{lang}", f"Language '{lang}' is not available.")
         lang = "en"
     fallback_language = TEXTS.get("en") or next(iter(TEXTS.values()))
-    value = TEXTS.get(lang, fallback_language).get(key, fallback_language.get(key, key))
+    language_data = TEXTS.get(lang, fallback_language)
+    value = language_data.get(key)
+    if value is None:
+        value = fallback_language.get(key)
+        report_language_problem(
+            f"missing-translation:{lang}:{key}",
+            f"Missing translation key '{key}' in language '{lang}'.",
+        )
+    if value is None:
+        value = get_language_pack_help(f"missing translation key '{key}'")
     try:
         return value.format(**kwargs)
-    except Exception:
+    except Exception as exc:
+        report_language_problem(
+            f"translation-format:{lang}:{key}",
+            f"Translation key '{key}' has invalid placeholders: {exc}.",
+        )
         return value
 
 
 ERROR_DEFINITIONS = [
+    {
+        "name": "Nie mozna odczytac cookies z przegladarki",
+        "keywords": [
+            "could not copy chrome cookie database",
+            "could not copy cookie database",
+            "could not find chrome cookies database",
+            "could not find edge cookies database",
+            "could not find firefox cookies database",
+            "could not find brave cookies database",
+            "could not find opera cookies database",
+            "could not find vivaldi cookies database",
+            "cookies database",
+        ],
+        "reason": "Przegladarka blokuje plik cookies, profil nie istnieje albo nie jestes zalogowany w tej przegladarce.",
+        "repair": "Zamknij calkowicie przegladarke i sprobuj ponownie, wybierz inna przegladarke w ustawieniach albo uzyj gimmeacookie.bat do utworzenia cookies.txt.",
+    },
     {
         "name": "Material prywatny lub wymagajacy cookies",
         "keywords": [
@@ -301,6 +426,13 @@ ERROR_DEFINITIONS = [
         "keywords": ["http error 403", "403: forbidden", "403 forbidden", "unable to download video data"],
         "reason": "Serwis odrzucil pobieranie danych wideo. Najczesciej oznacza to blokade po stronie YouTube/serwisu, nieaktualny yt-dlp, ograniczenie regionalne, cookies albo chwilowa blokade adresu IP.",
         "repair": "Zaktualizuj yt-dlp, sprobuj ponownie pozniej, uzyj innego formatu/jakosci albo dodaj cookies z przegladarki dla materialow wymagajacych sesji.",
+    },
+    {
+        "name": "HTTP 410 Gone",
+        "keywords": ["http error 410", "410: gone", "410 gone"],
+        "reason": "Serwis informuje, ze material nie jest juz dostepny pod tym adresem. Najczesciej film zostal usuniety, ukryty, zablokowany regionalnie albo link wygasl.",
+        "repair": "Otworz link w przegladarce i sprawdz, czy film nadal dziala. Jesli strona pokazuje blad lub przekierowanie, uzyj aktualnego publicznego linku do materialu.",
+        "stop_retries": True,
     },
     {
         "name": "HTTP 500 / blad serwera",
@@ -420,6 +552,7 @@ DOWNLOAD_CANCEL_REQUESTED = False
 COMPLETED_DOWNLOAD_KEYS: set[str] = set()
 COMPLETED_DOWNLOAD_TITLES: list[str] = []
 COMPLETED_DOWNLOAD_FILES: list[str] = []
+DUPLICATE_FILE_EVENTS: list[dict[str, str]] = []
 DOWNLOAD_STAT_KEYS = ("total", "spotify", "youtube", "naughties", *NAUGHTY_STAT_KEYS, "other")
 TOTAL_USAGE_SECONDS = 0
 SESSION_STARTED_AT = time.time()
@@ -669,6 +802,7 @@ def run_doctor() -> None:
     doctor_line("browser-cookie3", browser_cookie3 is not None)
     doctor_line("BeautifulSoup/lxml", BeautifulSoup is not None and lxml is not None)
     doctor_line("mutagen", mutagen is not None)
+    doctor_line("Selenium", importlib.util.find_spec("selenium") is not None)
     doctor_line("SQLite", True, sqlite3.sqlite_version)
     doctor_line(t("doctor_internet"), has_internet_connection())
     path, error = validate_download_dir(str(DEFAULT_DOWNLOAD_DIR))
@@ -866,6 +1000,19 @@ def load_config() -> None:
     save_config()
 
 
+def format_bool_setting(value: int) -> str:
+    return t("setting_on") if value else t("setting_off")
+
+
+def choose_setting_value(title: str, values: dict[str, str]) -> str | None:
+    options = {"0": t("back_to_menu").strip()}
+    options.update(values)
+    choice = ask_choice(title, options)
+    if choice == "0":
+        return None
+    return values.get(choice)
+
+
 def show_settings_menu() -> None:
     global DEBUG, LANG, DEFAULT_DOWNLOAD_DIR, DEFAULT_MEDIA_TYPE, CLIPBOARD_POPUP
     global FACEBOOK_COOKIES_FROM_BROWSER, FACEBOOK_COOKIES_FILE
@@ -877,11 +1024,11 @@ def show_settings_menu() -> None:
         available_languages = get_available_languages()
         options = {
             "1": f"{t('settings_language')}: {LANG} ({', '.join(available_languages)})",
-            "2": f"{t('settings_debug')}: {DEBUG}",
+            "2": f"{t('settings_debug')}: {format_bool_setting(DEBUG)}",
             "3": f"{t('settings_download_dir')}: {DEFAULT_DOWNLOAD_DIR}",
-            "4": f"{t('settings_default_media')}: {DEFAULT_MEDIA_TYPE}",
-            "5": f"{t('settings_popup')}: {CLIPBOARD_POPUP}",
-            "6": f"{t('settings_fb_browser')}: {FACEBOOK_COOKIES_FROM_BROWSER}",
+            "4": f"{t('settings_default_media')}: {DEFAULT_MEDIA_TYPE.upper()}",
+            "5": f"{t('settings_popup')}: {format_bool_setting(CLIPBOARD_POPUP)}",
+            "6": f"{t('settings_fb_browser')}: {FACEBOOK_COOKIES_FROM_BROWSER or t('setting_off')}",
             "7": f"{t('settings_fb_file')}: {FACEBOOK_COOKIES_FILE or '-'}",
             "8": t("settings_import_cookies"),
             "9": f"{t('settings_youtube_clipboard_mode')}: {YOUTUBE_CLIPBOARD_LINK_MODE}",
@@ -899,30 +1046,78 @@ def show_settings_menu() -> None:
             input(t("continue_prompt"))
             continue
 
-        value = input(t("settings_prompt_value")).strip().strip('"')
-        if choice == "1" and value.lower() in available_languages:
-            LANG = value.lower()
-        elif choice == "2" and value in {"0", "1"}:
-            DEBUG = int(value)
-        elif choice == "3" and value:
+        if choice == "1":
+            lang_options = {str(index): language for index, language in enumerate(available_languages, start=1)}
+            selected = choose_setting_value(t("settings_language"), lang_options)
+            if selected is None:
+                continue
+            LANG = selected
+        elif choice == "2":
+            selected = choose_setting_value(
+                t("settings_debug"),
+                {"1": t("setting_off"), "2": t("setting_on")},
+            )
+            if selected is None:
+                continue
+            DEBUG = 1 if selected == t("setting_on") else 0
+        elif choice == "3":
+            value = input(t("settings_prompt_value")).strip().strip('"')
+            if not value:
+                continue
             path, error = validate_download_dir(value)
             if path is None:
                 print(t("invalid_save_path", error=error))
                 continue
             DEFAULT_DOWNLOAD_DIR = path
-        elif choice == "4" and value.lower() in {"mp3", "mp4"}:
-            DEFAULT_MEDIA_TYPE = value.lower()
-        elif choice == "5" and value in {"0", "1"}:
-            CLIPBOARD_POPUP = int(value)
+        elif choice == "4":
+            selected = choose_setting_value(
+                t("settings_default_media"),
+                {"1": "mp4", "2": "mp3"},
+            )
+            if selected is None:
+                continue
+            DEFAULT_MEDIA_TYPE = selected
+        elif choice == "5":
+            selected = choose_setting_value(
+                t("settings_popup"),
+                {"1": t("setting_off"), "2": t("setting_on")},
+            )
+            if selected is None:
+                continue
+            CLIPBOARD_POPUP = 1 if selected == t("setting_on") else 0
         elif choice == "6":
-            FACEBOOK_COOKIES_FROM_BROWSER = value.lower()
+            browser_options = {"1": t("setting_off")}
+            browser_options.update(
+                {
+                    str(index): COOKIE_BROWSER_NAMES.get(browser, browser.title())
+                    for index, browser in enumerate(COOKIE_BROWSER_FALLBACKS, start=2)
+                }
+            )
+            selected = choose_setting_value(t("settings_fb_browser"), browser_options)
+            if selected is None:
+                continue
+            if selected == t("setting_off"):
+                FACEBOOK_COOKIES_FROM_BROWSER = ""
+            else:
+                reverse_browser_names = {
+                    COOKIE_BROWSER_NAMES.get(browser, browser.title()): browser for browser in COOKIE_BROWSER_FALLBACKS
+                }
+                FACEBOOK_COOKIES_FROM_BROWSER = reverse_browser_names.get(selected, selected.lower())
         elif choice == "7":
+            value = input(t("settings_prompt_value")).strip().strip('"')
             FACEBOOK_COOKIES_FILE = value
-        elif choice == "9" and value.lower() in {"auto", "single", "playlist"}:
-            YOUTUBE_CLIPBOARD_LINK_MODE = value.lower()
-        elif value:
-            print(t("invalid_choice"))
-            continue
+        elif choice == "9":
+            selected = choose_setting_value(
+                t("settings_youtube_clipboard_mode"),
+                {
+                    "1": "auto",
+                    "2": "single",
+                    "3": "playlist",
+                },
+            )
+            if selected is None:
+                continue
+            YOUTUBE_CLIPBOARD_LINK_MODE = selected
         save_config()
         print(t("settings_saved"))
 
@@ -1111,6 +1306,105 @@ def hash_file(path: Path) -> tuple[str | None, str | None]:
         return md5.hexdigest(), sha256.hexdigest()
     except OSError:
         return None, None
+
+
+def make_numbered_path(path: Path, reserved_paths: set[Path] | None = None) -> Path:
+    reserved = {item.resolve() for item in (reserved_paths or set()) if item}
+    index = 1
+    while True:
+        candidate = path.with_name(f"{path.stem} ({index}){path.suffix}")
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            resolved = candidate
+        if not candidate.exists() and resolved not in reserved:
+            return candidate
+        index += 1
+
+
+def related_final_paths(path: Path, media_type: str | None = None) -> list[Path]:
+    paths = [path]
+    if media_type == "mp3":
+        paths.extend([path.with_suffix(".mp3"), path.with_suffix(".m4a"), path.with_suffix(".webm")])
+    elif media_type == "mp4":
+        paths.extend([path.with_suffix(".mp4"), path.with_suffix(".mkv"), path.with_suffix(".webm")])
+    return list(dict.fromkeys(paths))
+
+
+def existing_related_path(path: Path, media_type: str | None = None) -> Path | None:
+    for candidate in related_final_paths(path, media_type):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def register_duplicate_file(original: Path, duplicate: Path) -> None:
+    event = {"original": str(original), "duplicate": str(duplicate)}
+    if event not in DUPLICATE_FILE_EVENTS:
+        DUPLICATE_FILE_EVENTS.append(event)
+
+
+def get_duplicate_created_files() -> list[Path]:
+    files: list[Path] = []
+    seen: set[Path] = set()
+    for event in DUPLICATE_FILE_EVENTS:
+        duplicate = Path(event["duplicate"])
+        candidates = [
+            duplicate,
+            duplicate.with_suffix(".mp3"),
+            duplicate.with_suffix(".mp4"),
+            duplicate.with_suffix(".m4a"),
+            duplicate.with_suffix(".webm"),
+            duplicate.with_suffix(".mkv"),
+        ]
+        for candidate in candidates:
+            if not candidate.exists() or not candidate.is_file():
+                continue
+            resolved = candidate.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            files.append(candidate)
+    return files
+
+
+def ask_duplicate_cleanup() -> None:
+    if not DUPLICATE_FILE_EVENTS:
+        return
+
+    duplicate_files = get_duplicate_created_files()
+    if not duplicate_files:
+        DUPLICATE_FILE_EVENTS.clear()
+        return
+
+    print()
+    print(t("duplicate_detected"))
+    for path in duplicate_files[:10]:
+        print(f"- {path.name}")
+    if len(duplicate_files) > 10:
+        print(t("saved_more", count=len(duplicate_files) - 10))
+
+    print(t("duplicate_action"))
+    print(f"1. {t('duplicate_keep')}")
+    print(f"2. {t('duplicate_delete')}")
+    while True:
+        action = input(t("choose_option")).strip()
+        if action in {"1", "2"}:
+            break
+        print(t("invalid_choice"))
+    if action == "2":
+        deleted = 0
+        for path in duplicate_files:
+            try:
+                path.unlink()
+                deleted += 1
+            except OSError as exc:
+                log_path = write_error_log(exc, f"Deleting duplicate file: {path}")
+                print(t("details_saved", path=log_path))
+        print(t("duplicate_deleted", count=deleted))
+    else:
+        print(t("duplicate_kept"))
+    DUPLICATE_FILE_EVENTS.clear()
 
 
 def normalize_hex_checksum(value: object, algorithm: str) -> str | None:
@@ -1467,6 +1761,7 @@ def print_saved_summary(saved_path: Path, saved_items: Iterable[str] | None = No
     print(f"{t('location')}: {make_folder_hyperlink(saved_path)}")
     if not terminal_supports_hyperlinks():
         print(f"URI: {make_folder_uri(saved_path)}")
+    ask_duplicate_cleanup()
     print()
     COMPLETED_DOWNLOAD_FILES.clear()
 
@@ -2152,8 +2447,11 @@ def looks_like_url(value: str) -> bool:
 
 def normalize_user_url(value: str) -> str:
     clean = value.strip().strip('"')
-    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", clean):
-        return clean
+    has_scheme = bool(re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", clean))
+    if has_scheme:
+        normalized = clean
+    else:
+        normalized = ""
     lowered = clean.lower()
     known_prefixes = (
         "youtube.com/",
@@ -2167,12 +2465,20 @@ def normalize_user_url(value: str) -> str:
         "mega.nz/",
         "drive.google.com/",
         "open.spotify.com/",
+        "pl.pornhub.com/",
         "pornhub.com/",
         "beeg.com/",
     )
-    if lowered.startswith(known_prefixes) or lowered.startswith("www."):
-        return "https://" + clean
-    return clean
+    if not normalized and (lowered.startswith(known_prefixes) or lowered.startswith("www.")):
+        normalized = "https://" + clean
+    if not normalized:
+        return clean
+
+    parsed = urlparse(normalized)
+    host = parsed.netloc.lower()
+    if host == "pornhub.com" or host.endswith(".pornhub.com"):
+        return urlunparse(parsed._replace(netloc="www.pornhub.com"))
+    return normalized
 
 
 def is_youtube_watch_url(url: str) -> bool:
@@ -2709,6 +3015,11 @@ def download_large_file(
     remote_name = str(remote_name) if remote_name else None
     filename = remote_name or filename_from_response_or_url(url)
     target = download_dir / filename
+    if target.exists():
+        duplicate_target = make_numbered_path(target)
+        register_duplicate_file(target, duplicate_target)
+        target = duplicate_target
+        filename = target.name
     partial = download_dir / f"{filename}.part"
     download_dir.mkdir(parents=True, exist_ok=True)
     existing = partial.stat().st_size if partial.exists() else 0
@@ -2809,6 +3120,7 @@ def download_cloud_file_with_ytdlp(url: str, download_dir: Path) -> tuple[str, P
     options = {
         "outtmpl": str(download_dir / "%(title|download)s [%(id)s].%(ext)s"),
         "continuedl": True,
+        "_vd_media_type": "mp4",
         "retries": LARGE_FILE_MAX_RETRIES,
         "fragment_retries": LARGE_FILE_MAX_RETRIES,
         "socket_timeout": 30,
@@ -2825,7 +3137,7 @@ def download_cloud_file_with_ytdlp(url: str, download_dir: Path) -> tuple[str, P
 
     try:
         before_files = {path.name for path in download_dir.iterdir() if path.is_file()}
-        with yt_dlp.YoutubeDL(options) as ydl:
+        with DuplicateSafeYoutubeDL(options) as ydl:
             ydl.download([url])
         after_files = [path for path in download_dir.iterdir() if path.is_file() and path.name not in before_files]
         completed = [path for path in after_files if not path.name.endswith(".part")]
@@ -2967,6 +3279,12 @@ def is_naughty_url(url: str) -> bool:
     parsed = urlparse(normalize_user_url(url))
     host = parsed.netloc.lower().removeprefix("www.")
     return any(host == domain or host.endswith(f".{domain}") for domain in NAUGHTY_SITE_HINTS)
+
+
+def is_hqporner_url(url: str) -> bool:
+    parsed = urlparse(normalize_user_url(url))
+    host = parsed.netloc.lower().removeprefix("www.")
+    return host == "hqporner.com" or host.endswith(".hqporner.com")
 
 
 def get_clipboard_media_type(url: str) -> str:
@@ -3325,6 +3643,23 @@ def is_facebook_reel_url(url: str) -> bool:
     return parsed.path.strip("/").startswith("reel/")
 
 
+def is_pornhub_url(url: str) -> bool:
+    parsed = urlparse(normalize_user_url(url))
+    host = parsed.netloc.lower().removeprefix("www.")
+    return host == "pornhub.com" or host.endswith(".pornhub.com")
+
+
+def normalize_pornhub_url(url: str) -> str:
+    normalized = normalize_user_url(url)
+    if not is_pornhub_url(normalized):
+        return normalized
+    parsed = urlparse(normalized)
+    host = parsed.netloc.lower()
+    if host == "www.pornhub.com":
+        return normalized
+    return urlunparse(parsed._replace(netloc="www.pornhub.com"))
+
+
 def get_direct_media_extension(url: str) -> str | None:
     path = urlparse(url).path.lower()
     for extension in (".mp4", ".mov", ".m4v", ".webm", ".jpg", ".jpeg", ".png", ".gif", ".webp"):
@@ -3335,6 +3670,405 @@ def get_direct_media_extension(url: str) -> str | None:
 
 def is_direct_media_url(url: str) -> bool:
     return get_direct_media_extension(url) is not None
+
+
+def fetch_webpage_text(url: str, referer: str | None = None, timeout: int = 25) -> str:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9,pl;q=0.8",
+    }
+    if referer:
+        headers["Referer"] = referer
+    request = Request(url, headers=headers)
+    with urlopen(request, timeout=timeout) as response:
+        raw = response.read()
+        encoding = response.headers.get_content_charset() or "utf-8"
+    return raw.decode(encoding, errors="replace")
+
+
+def decode_html_url(value: str, base_url: str) -> str:
+    cleaned = value.strip().strip('"').strip("'")
+    cleaned = cleaned.replace("\\/", "/").replace("&amp;", "&")
+    cleaned = unquote(cleaned)
+    return urljoin(base_url, cleaned)
+
+
+def extract_media_urls_from_html(html: str, base_url: str) -> list[str]:
+    candidates: list[str] = []
+    patterns = [
+        r"""<source[^>]+src=["']([^"']+)["']""",
+        r"""["'](?:file|video_url|videoUrl|src|remoteUrl)["']\s*:\s*["']([^"']+\.(?:mp4|m3u8)(?:\?[^"']*)?)["']""",
+        r"""(?:file|video_url|videoUrl|src)\s*[:=]\s*["']([^"']+\.(?:mp4|m3u8)(?:\?[^"']*)?)["']""",
+        r"""["'](https?:\\?/\\?/[^"']+\.(?:mp4|m3u8)(?:\?[^"']*)?)["']""",
+        r"""["']([^"']+\.(?:mp4|m3u8)(?:\?[^"']*)?)["']""",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, html, flags=re.IGNORECASE):
+            url = decode_html_url(match.group(1), base_url)
+            if url.startswith(("http://", "https://")) and url not in candidates:
+                candidates.append(url)
+
+    for escaped_url in re.findall(r"https?:\\u002F\\u002F[^\"']+\.(?:mp4|m3u8)(?:\\u003F[^\"']*)?", html, flags=re.IGNORECASE):
+        decoded = escaped_url.encode("utf-8").decode("unicode_escape")
+        url = decode_html_url(decoded, base_url)
+        if url.startswith(("http://", "https://")) and url not in candidates:
+            candidates.append(url)
+    return candidates
+
+
+def extract_hqporner_player_urls(html: str, base_url: str) -> list[str]:
+    candidates: list[str] = []
+    patterns = [
+        r"""<iframe[^>]+src=["']([^"']+)["']""",
+        r"""href=["']([^"']*(?:alternative|alt|player|embed|iframe)[^"']*)["']""",
+        r"""data-[a-z0-9_-]+=["']([^"']*(?:alternative|alt|player|embed|iframe)[^"']*)["']""",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, html, flags=re.IGNORECASE):
+            url = decode_html_url(match.group(1), base_url)
+            if url.startswith(("http://", "https://")) and url not in candidates:
+                candidates.append(url)
+    return candidates
+
+
+def extract_naughty_player_urls(html: str, base_url: str) -> list[str]:
+    candidates = extract_hqporner_player_urls(html, base_url)
+    patterns = [
+        r"""["'](?:embedUrl|contentUrl|playerUrl|videoUrl)["']\s*:\s*["']([^"']+)["']""",
+        r"""<meta[^>]+(?:property|name)=["'](?:og:video|og:video:url|twitter:player)["'][^>]+content=["']([^"']+)["']""",
+        r"""<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:video|og:video:url|twitter:player)["']""",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, html, flags=re.IGNORECASE):
+            url = decode_html_url(match.group(1), base_url)
+            if url.startswith(("http://", "https://")) and url not in candidates:
+                candidates.append(url)
+    return candidates
+
+
+def media_quality_score(url: str) -> tuple[int, int]:
+    lowered = url.lower()
+    quality = 0
+    quality_match = re.search(r"(?<!\d)(2160|1440|1080|720|480|360|240)(?:p)?(?!\d)", lowered)
+    if quality_match:
+        quality = int(quality_match.group(1))
+    type_score = 2 if ".mp4" in lowered else 1 if ".m3u8" in lowered else 0
+    return quality, type_score
+
+
+def is_player_like_url(url: str) -> bool:
+    lowered = url.lower()
+    return any(token in lowered for token in ("alternative", "alt", "player", "embed", "iframe"))
+
+
+def ensure_selenium_available() -> bool:
+    try:
+        importlib.import_module("selenium")
+        return True
+    except ImportError:
+        return ensure_python_import("selenium", "selenium")
+    except Exception:
+        return False
+
+
+def collect_selenium_urls(driver, base_url: str) -> tuple[list[str], list[str]]:
+    media_urls = extract_media_urls_from_html(getattr(driver, "page_source", "") or "", base_url)
+    player_urls = extract_naughty_player_urls(getattr(driver, "page_source", "") or "", base_url)
+    try:
+        raw_urls = driver.execute_script(
+            """
+            const urls = [];
+            for (const el of document.querySelectorAll('video, source, iframe, a, button')) {
+                for (const attr of ['src', 'href', 'data-src', 'data-href', 'data-url']) {
+                    const value = el[attr] || el.getAttribute(attr);
+                    if (value) urls.push(value);
+                }
+                if (el.currentSrc) urls.push(el.currentSrc);
+                const onclick = el.getAttribute('onclick');
+                if (onclick) urls.push(onclick);
+            }
+            return urls;
+            """
+        )
+    except Exception:
+        raw_urls = []
+
+    for raw_url in raw_urls or []:
+        candidate = decode_html_url(str(raw_url), base_url)
+        if not candidate.startswith(("http://", "https://")):
+            continue
+        if re.search(r"\.(?:mp4|m3u8)(?:\?|$)", candidate, flags=re.IGNORECASE):
+            if candidate not in media_urls:
+                media_urls.append(candidate)
+        elif is_player_like_url(candidate) and candidate not in player_urls:
+            player_urls.append(candidate)
+
+    return media_urls, player_urls
+
+
+def click_hqporner_alternative_player(driver) -> bool:
+    try:
+        return bool(
+            driver.execute_script(
+                """
+                const words = /alternative|alt\\s*player|player/i;
+                const elements = Array.from(document.querySelectorAll('a, button'));
+                const target = elements.find((el) => {
+                    const text = `${el.innerText || ''} ${el.textContent || ''} ${el.href || ''} ${el.getAttribute('onclick') || ''}`;
+                    return words.test(text);
+                });
+                if (!target) return false;
+                target.scrollIntoView({block: 'center', inline: 'center'});
+                target.click();
+                return true;
+                """
+            )
+        )
+    except Exception:
+        return False
+
+
+def click_naughty_player_elements(driver) -> bool:
+    try:
+        return bool(
+            driver.execute_script(
+                """
+                const words = /alternative|alt\\s*player|player|play|watch|embed/i;
+                const elements = Array.from(document.querySelectorAll('a, button, [role="button"]'));
+                const target = elements.find((el) => {
+                    const text = `${el.innerText || ''} ${el.textContent || ''} ${el.href || ''} ${el.getAttribute('onclick') || ''} ${el.className || ''}`;
+                    return words.test(text);
+                });
+                if (!target) return false;
+                target.scrollIntoView({block: 'center', inline: 'center'});
+                target.click();
+                return true;
+                """
+            )
+        )
+    except Exception:
+        return False
+
+
+def selenium_driver_factories():
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options as ChromeOptions
+    from selenium.webdriver.edge.options import Options as EdgeOptions
+    from selenium.webdriver.firefox.options import Options as FirefoxOptions
+
+    chrome_options = ChromeOptions()
+    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--log-level=3")
+    chrome_options.page_load_strategy = "eager"
+    yield "Chrome", lambda: webdriver.Chrome(options=chrome_options)
+
+    edge_options = EdgeOptions()
+    edge_options.add_argument("--headless=new")
+    edge_options.add_argument("--disable-gpu")
+    edge_options.add_argument("--log-level=3")
+    edge_options.page_load_strategy = "eager"
+    yield "Edge", lambda: webdriver.Edge(options=edge_options)
+
+    firefox_options = FirefoxOptions()
+    firefox_options.add_argument("-headless")
+    firefox_options.page_load_strategy = "eager"
+    yield "Firefox", lambda: webdriver.Firefox(options=firefox_options)
+
+
+def resolve_hqporner_media_url_with_browser(url: str) -> str | None:
+    if not ensure_selenium_available():
+        if DEBUG:
+            print("HQPorner browser fallback skipped: Selenium is not available.")
+        return None
+
+    try:
+        factories = list(selenium_driver_factories())
+    except Exception as exc:
+        if DEBUG:
+            print(f"HQPorner browser fallback skipped: {exc}")
+        return None
+
+    start_url = normalize_user_url(url)
+    for browser_name, driver_factory in factories:
+        driver = None
+        try:
+            driver = driver_factory()
+            driver.set_page_load_timeout(30)
+            pages_to_check = [start_url]
+            checked_pages: set[str] = set()
+            media_urls: list[str] = []
+
+            for page_url in pages_to_check:
+                if page_url in checked_pages or len(checked_pages) >= 5:
+                    continue
+                checked_pages.add(page_url)
+                driver.get(page_url)
+                time.sleep(3)
+                current_base = getattr(driver, "current_url", "") or page_url
+
+                found_media, found_players = collect_selenium_urls(driver, current_base)
+                for media_url in found_media:
+                    if media_url not in media_urls:
+                        media_urls.append(media_url)
+                for player_url in found_players:
+                    if player_url not in checked_pages and player_url not in pages_to_check:
+                        pages_to_check.append(player_url)
+
+                if click_hqporner_alternative_player(driver):
+                    time.sleep(3)
+                    current_base = getattr(driver, "current_url", "") or page_url
+                    found_media, found_players = collect_selenium_urls(driver, current_base)
+                    for media_url in found_media:
+                        if media_url not in media_urls:
+                            media_urls.append(media_url)
+                    for player_url in found_players:
+                        if player_url not in checked_pages and player_url not in pages_to_check:
+                            pages_to_check.append(player_url)
+
+            if media_urls:
+                return max(media_urls, key=media_quality_score)
+        except Exception as exc:
+            if DEBUG:
+                print(f"HQPorner browser fallback failed in {browser_name}: {exc}")
+        finally:
+            if driver is not None:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+
+    return None
+
+
+def resolve_naughty_media_url_with_browser(url: str) -> str | None:
+    if is_hqporner_url(url):
+        return resolve_hqporner_media_url_with_browser(url)
+
+    if not ensure_selenium_available():
+        if DEBUG:
+            print("Naughties browser fallback skipped: Selenium is not available.")
+        return None
+
+    try:
+        factories = list(selenium_driver_factories())
+    except Exception as exc:
+        if DEBUG:
+            print(f"Naughties browser fallback skipped: {exc}")
+        return None
+
+    start_url = normalize_pornhub_url(url) if is_pornhub_url(url) else normalize_user_url(url)
+    for browser_name, driver_factory in factories:
+        driver = None
+        try:
+            driver = driver_factory()
+            driver.set_page_load_timeout(30)
+            pages_to_check = [start_url]
+            checked_pages: set[str] = set()
+            media_urls: list[str] = []
+
+            for page_url in pages_to_check:
+                if page_url in checked_pages or len(checked_pages) >= 5:
+                    continue
+                checked_pages.add(page_url)
+                driver.get(page_url)
+                time.sleep(3)
+                current_base = getattr(driver, "current_url", "") or page_url
+
+                found_media, found_players = collect_selenium_urls(driver, current_base)
+                for media_url in found_media:
+                    if media_url not in media_urls:
+                        media_urls.append(media_url)
+                for player_url in found_players:
+                    if player_url not in checked_pages and player_url not in pages_to_check:
+                        pages_to_check.append(player_url)
+
+                if click_naughty_player_elements(driver):
+                    time.sleep(3)
+                    current_base = getattr(driver, "current_url", "") or page_url
+                    found_media, found_players = collect_selenium_urls(driver, current_base)
+                    for media_url in found_media:
+                        if media_url not in media_urls:
+                            media_urls.append(media_url)
+                    for player_url in found_players:
+                        if player_url not in checked_pages and player_url not in pages_to_check:
+                            pages_to_check.append(player_url)
+
+            if media_urls:
+                return max(media_urls, key=media_quality_score)
+        except Exception as exc:
+            if DEBUG:
+                print(f"Naughties browser fallback failed in {browser_name}: {exc}")
+        finally:
+            if driver is not None:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+
+    return None
+
+
+def resolve_naughty_media_url(url: str) -> str | None:
+    if not is_naughty_url(url):
+        return None
+    if is_hqporner_url(url):
+        return resolve_hqporner_media_url(url)
+
+    checked_pages: set[str] = set()
+    start_url = normalize_pornhub_url(url) if is_pornhub_url(url) else normalize_user_url(url)
+    pages_to_check = [start_url]
+    media_urls: list[str] = []
+    for page_url in pages_to_check:
+        if page_url in checked_pages or len(checked_pages) >= 6:
+            continue
+        checked_pages.add(page_url)
+        try:
+            html = fetch_webpage_text(page_url, referer=url)
+        except Exception as exc:
+            if DEBUG:
+                print(t("hqporner_resolve_failed", error=exc))
+            continue
+        for media_url in extract_media_urls_from_html(html, page_url):
+            if media_url not in media_urls:
+                media_urls.append(media_url)
+        for player_url in extract_naughty_player_urls(html, page_url):
+            if player_url not in checked_pages and player_url not in pages_to_check:
+                pages_to_check.append(player_url)
+
+    if media_urls:
+        return max(media_urls, key=media_quality_score)
+    return resolve_naughty_media_url_with_browser(url)
+
+
+def resolve_hqporner_media_url(url: str) -> str | None:
+    if not is_hqporner_url(url):
+        return None
+
+    checked_pages: set[str] = set()
+    pages_to_check = [normalize_user_url(url)]
+    media_urls: list[str] = []
+    for page_url in pages_to_check:
+        if page_url in checked_pages or len(checked_pages) >= 6:
+            continue
+        checked_pages.add(page_url)
+        try:
+            html = fetch_webpage_text(page_url, referer=url)
+        except Exception as exc:
+            if DEBUG:
+                print(t("hqporner_resolve_failed", error=exc))
+            continue
+        for media_url in extract_media_urls_from_html(html, page_url):
+            if media_url not in media_urls:
+                media_urls.append(media_url)
+        for player_url in extract_hqporner_player_urls(html, page_url):
+            if player_url not in checked_pages and player_url not in pages_to_check:
+                pages_to_check.append(player_url)
+
+    if media_urls:
+        return max(media_urls, key=media_quality_score)
+    return resolve_hqporner_media_url_with_browser(url)
 
 
 def safe_download_filename(url: str, fallback_prefix: str = "media") -> str:
@@ -3680,6 +4414,11 @@ def suggest_repair(error_text: str) -> str:
     return classify_error(error_text)["repair"]
 
 
+def should_stop_retrying(error: object) -> bool:
+    details = classify_error(sanitize_error_text(error))
+    return bool(details.get("stop_retries"))
+
+
 def print_error_details(error: object) -> None:
     error_text = sanitize_error_text(error)
     details = classify_error(error_text)
@@ -3689,7 +4428,7 @@ def print_error_details(error: object) -> None:
 
 
 def write_error_log(error: object, context: str = "") -> Path:
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = get_error_log_file()
 
     error_text = str(error)
     details = classify_error(error_text)
@@ -3697,24 +4436,26 @@ def write_error_log(error: object, context: str = "") -> Path:
     if isinstance(error, BaseException):
         stack = "".join(traceback.format_exception(type(error), error, error.__traceback__))
 
-    with ERROR_LOG_FILE.open("a", encoding="utf-8") as file:
-        file.write("=" * 80 + "\n")
-        file.write(f"Data: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        if context:
-            file.write(f"Kontekst: {context}\n")
-        file.write(f"Rodzaj bledu: {details['name']}\n")
-        file.write(f"Opis bledu: {error_text}\n")
-        file.write(f"Powod: {details['reason']}\n")
-        file.write(f"Sposob naprawy: {details['repair']}\n")
-        file.write("\nNajczestsze bledy i naprawy:\n")
-        for hint in COMMON_ERROR_HINTS:
-            file.write(f"- {hint}\n")
-        if stack:
-            file.write("\nSzczegoly techniczne:\n")
-            file.write(stack)
-        file.write("\n")
-
-    return ERROR_LOG_FILE
+    try:
+        with log_file.open("a", encoding="utf-8") as file:
+            file.write("=" * 80 + "\n")
+            file.write(f"Data: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            if context:
+                file.write(f"Kontekst: {context}\n")
+            file.write(f"Rodzaj bledu: {details['name']}\n")
+            file.write(f"Opis bledu: {error_text}\n")
+            file.write(f"Powod: {details['reason']}\n")
+            file.write(f"Sposob naprawy: {details['repair']}\n")
+            file.write("\nNajczestsze bledy i naprawy:\n")
+            for hint in COMMON_ERROR_HINTS:
+                file.write(f"- {hint}\n")
+            if stack:
+                file.write("\nSzczegoly techniczne:\n")
+                file.write(stack)
+            file.write("\n")
+        return log_file
+    except OSError:
+        return log_file
 
 
 class QuietYtdlpLogger:
@@ -3732,6 +4473,35 @@ class QuietYtdlpLogger:
 
     def error(self, message: str) -> None:
         print(f"ERROR: {message}")
+
+
+class DuplicateSafeYoutubeDL(yt_dlp.YoutubeDL if yt_dlp is not None else object):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._vd_duplicate_filename_cache: dict[str, str] = {}
+        self._vd_reserved_duplicate_paths: set[Path] = set()
+
+    def prepare_filename(self, info_dict, dir_type="", *, outtmpl=None, warn=False):  # type: ignore[override]
+        filename = super().prepare_filename(info_dict, dir_type=dir_type, outtmpl=outtmpl, warn=warn)
+        if not filename or filename == "-" or dir_type not in {"", "temp"}:
+            return filename
+
+        path = Path(filename)
+        cache_key = str(path)
+        if cache_key in self._vd_duplicate_filename_cache:
+            return self._vd_duplicate_filename_cache[cache_key]
+
+        media_type = str(self.params.get("_vd_media_type") or "").lower()
+        existing_path = existing_related_path(path, media_type)
+        if existing_path is None:
+            self._vd_duplicate_filename_cache[cache_key] = filename
+            return filename
+
+        duplicate_path = make_numbered_path(path, self._vd_reserved_duplicate_paths)
+        self._vd_reserved_duplicate_paths.add(duplicate_path.resolve())
+        register_duplicate_file(existing_path, duplicate_path)
+        self._vd_duplicate_filename_cache[cache_key] = str(duplicate_path)
+        return str(duplicate_path)
 
 
 def format_seconds(seconds: float | int | None) -> str:
@@ -4429,6 +5199,7 @@ def build_download_options(
     options = {
         "outtmpl": output_template,
         "ignoreerrors": False,
+        "_vd_media_type": media_type,
         "noplaylist": source_type == "link",
         "postprocessor_hooks": [postprocessor_hook],
         "progress_hooks": [progress_hook],
@@ -4442,6 +5213,17 @@ def build_download_options(
             "Accept-Language": "en-US,en;q=0.9,pl;q=0.8",
         },
     }
+
+    if url and is_pornhub_url(url):
+        headers = dict(options.get("http_headers", {}))
+        headers.update(
+            {
+                "Referer": "https://www.pornhub.com/",
+                "Origin": "https://www.pornhub.com",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            }
+        )
+        options["http_headers"] = headers
 
     if not DEBUG:
         options.update(
@@ -4721,10 +5503,22 @@ def download(
         print(f"\n{t('download_label')} ({detect_site(url)}): {url}")
         print(t("download_stop_hint"))
         last_error = None
+        download_url = url
+        resolved_referer = ""
 
         if is_spotify_url(url):
             print(t("spotify_not_supported"))
             continue
+
+        if media_type == "mp4" and is_pornhub_url(url):
+            download_url = normalize_pornhub_url(url)
+
+        if media_type == "mp4" and is_naughty_url(url):
+            resolved_url = resolve_naughty_media_url(url)
+            if resolved_url and resolved_url != url:
+                download_url = resolved_url
+                resolved_referer = url
+                print(t("hqporner_resolved"))
 
         for attempt, strategy in enumerate(strategies, start=1):
             if attempt > 1:
@@ -4745,8 +5539,12 @@ def download(
                     strategy["options"],
                     url,
                 )
-                with yt_dlp.YoutubeDL(options) as ydl:
-                    ydl.download([url])
+                if resolved_referer:
+                    headers = dict(options.get("http_headers", {}))
+                    headers["Referer"] = resolved_referer
+                    options["http_headers"] = headers
+                with DuplicateSafeYoutubeDL(options) as ydl:
+                    ydl.download([download_url])
                 downloaded_titles = list(COMPLETED_DOWNLOAD_TITLES)
                 if not downloaded_titles and not is_collection_download(url, source_type):
                     downloaded_titles = [detect_site(url)]
@@ -4784,6 +5582,10 @@ def download(
                     stop_conversion_status()
                     clear_status_line()
                 last_error = exc
+                if should_stop_retrying(exc):
+                    print(f"\nNie udalo sie: {format_user_error(exc)}")
+                    print_error_details(exc)
+                    break
                 if attempt < len(strategies):
                     print(f"\nNie udalo sie: {format_user_error(exc)}")
                     print_error_details(exc)

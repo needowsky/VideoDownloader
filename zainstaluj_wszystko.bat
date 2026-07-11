@@ -364,7 +364,7 @@ if not defined PYTHON_EXE (
 
 )
 
-"%PYTHON_EXE%" -c "import yt_dlp, gallery_dl, spotdl, rich, textual, browser_cookie3, bs4, lxml, mutagen, sqlite3" >> "%INSTALL_LOG%" 2>&1
+"%PYTHON_EXE%" -c "import yt_dlp, gallery_dl, spotdl, rich, textual, browser_cookie3, bs4, lxml, mutagen, selenium, sqlite3" >> "%INSTALL_LOG%" 2>&1
 
 if errorlevel 1 (
 
@@ -899,7 +899,7 @@ if /i "%ERR_STAGE%"=="helper packages" (
 
     echo Error type: UI/helper libraries installation failed.
 
-    echo Reason: pip could not install Rich/Textual/browser-cookie3/BeautifulSoup/lxml/mutagen, usually because PyPI is blocked, Python is broken, or build wheels are unavailable.
+    echo Reason: pip could not install Rich/Textual/browser-cookie3/BeautifulSoup/lxml/mutagen/Selenium, usually because PyPI is blocked, Python is broken, or build wheels are unavailable.
 
     echo How to fix: Check internet, run as administrator, unblock Python in firewall, then run the installer again.
 
@@ -1487,7 +1487,11 @@ call :InstallPipPackageWithFallback "mutagen"
 
 if errorlevel 1 exit /b 1
 
-"%PYTHON_EXE%" -c "import rich, textual, browser_cookie3, bs4, lxml, mutagen, sqlite3" >> "%INSTALL_LOG%" 2>&1
+call :InstallPipPackageWithFallback "selenium"
+
+if errorlevel 1 exit /b 1
+
+"%PYTHON_EXE%" -c "import rich, textual, browser_cookie3, bs4, lxml, mutagen, selenium, sqlite3" >> "%INSTALL_LOG%" 2>&1
 
 if errorlevel 1 exit /b 1
 

@@ -53,6 +53,17 @@ Planned release: https://github.com/needowsky/VideoDownloader/releases/tag/EXE-3
 - Reduced playlist/channel console flooding by reusing one locked status block across download, conversion and saved states.
 - Added a `file:///...` folder URI fallback when clickable terminal hyperlinks are not supported.
 - Fixed playlist/channel progress drawing so the console no longer leaves a long empty receipt-like area above the active item.
+- Added a language-pack safety fallback: missing `.lang` files or missing translation keys now show a GitHub update/reinstall hint instead of crashing the app.
+- Settings now use selection menus for fixed values such as language, debug, popup, default media type, browser cookies and YouTube clipboard mode.
+- Custom language packs are now validated against the English base pack for missing keys and placeholder mismatches.
+- Existing filenames are no longer overwritten or skipped silently: new duplicates are saved with ` (1)`, ` (2)` etc., then the app asks whether to keep or remove the newly downloaded duplicate.
+- HQPorner downloads now try an alternative-player/direct-media resolver before falling back to the standard yt-dlp extractor.
+- HQPorner resolver now has a Selenium browser-render fallback inspired by bulk HQPorner/Eporner downloader projects: when static HTML parsing does not reveal a media URL, the app can render the page, click an alternative player and extract direct `.mp4`/`.m3u8` sources.
+- Installer helper packages now include Selenium so the HQPorner browser fallback can work after a fresh setup.
+- Pornhub and other naughties now use the same alternative direct-media resolver path: the app checks HTML/player metadata such as `videoUrl`, then can use Selenium browser rendering before falling back to `yt-dlp`.
+- Added clearer download error definitions for `HTTP 410 Gone` and browser cookie database failures, and stopped pointless retry loops when a service reports that the material is gone.
+- Error logs now prefer the user's AppData folder and fall back to a temp log folder, avoiding crashes when the app cannot write beside installed files.
+- Pornhub links from localized domains such as `pl.pornhub.com` are normalized to `www.pornhub.com` and use a dedicated referer/origin header set before download.
 
 ## v3.0
 
