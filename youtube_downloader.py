@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from datetime import datetime
 import hashlib
+import importlib
 import importlib.util
 import errno
 import json
@@ -23,14 +24,29 @@ import webbrowser
 from http.cookiejar import MozillaCookieJar
 from typing import Iterable
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
+
+
+def enable_utf8_console() -> None:
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+enable_utf8_console()
+SUBPROCESS_TEXT_OPTIONS = {"text": True, "encoding": "utf-8", "errors": "replace"}
 
 PROGRAM_DIR = Path(__file__).resolve().parent
 LOCAL_PACKAGE_DIR = PROGRAM_DIR / "python_packages"
 LOCAL_PYTHON_EXE = PROGRAM_DIR / "tools" / "python312" / "python.exe"
 LOCAL_FFMPEG_BIN = PROGRAM_DIR / "tools" / "ffmpeg" / "bin"
-LOCAL_OFSCRAPER_PYTHON = PROGRAM_DIR / "tools" / "ofscraper_python" / "python.exe"
 REMOTE_VALIDATION_BY_URL: dict[str, dict[str, object]] = {}
 REMOTE_VALIDATION_BY_PATH: dict[str, dict[str, object]] = {}
 
@@ -41,11 +57,16 @@ def is_local_app_python() -> bool:
         return False
 
 
-if LOCAL_PACKAGE_DIR.exists() and is_local_app_python():
+if LOCAL_PACKAGE_DIR.exists():
     sys.path.insert(0, str(LOCAL_PACKAGE_DIR))
 
 if (LOCAL_FFMPEG_BIN / "ffmpeg.exe").exists():
     os.environ["PATH"] = str(LOCAL_FFMPEG_BIN) + os.pathsep + os.environ.get("PATH", "")
+
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 try:
     import yt_dlp
@@ -80,6 +101,13 @@ except ImportError:
     mutagen = None
 
 try:
+    import tkinter as tk
+    from tkinter import messagebox
+except ImportError:
+    tk = None
+    messagebox = None
+
+try:
     import msvcrt
 except ImportError:
     msvcrt = None
@@ -99,6 +127,7 @@ APP_LANG_DIR = APP_CONFIG_DIR / "lang"
 HISTORY_FILE = APP_DATA_DIR / "history.jsonl"
 LOCAL_LARGE_FILE_QUEUE_FILE = PROGRAM_DIR / "download_queue.txt"
 LARGE_FILE_QUEUE_FILE = APP_DATA_DIR / "download_queue.txt"
+CLIPBOARD_QUEUE_FILE = APP_DATA_DIR / "clipboard_queue.txt"
 LEGACY_DOWNLOAD_STATS_FILE = APP_DATA_DIR / ".download_stats"
 LEGACY_DOWNLOAD_BREAKDOWN_FILE = APP_DATA_DIR / ".download_breakdown"
 LOCAL_SNAKE_STATS_FILE = PROGRAM_DIR / ".snake_scoreboard"
@@ -131,22 +160,34 @@ WINDOWS_RESERVED_NAMES = {
 }
 DEBUG = 0
 LANG = "en"
-APP_VERSION = "v2.5"
+APP_VERSION = "v3.5"
 GITHUB_REPO = "needowsky/VideoDownloader"
 SKIP_EXIT_PAUSE = False
-FACEBOOK_COOKIES_FROM_BROWSER = "chrome"  # chrome/firefox/edge/opera/brave/vivaldi or empty
+FACEBOOK_COOKIES_FROM_BROWSER = "chrome"  # chrome/edge/firefox/opera/brave/vivaldi or empty
 FACEBOOK_COOKIES_FILE = ""  # optional Netscape cookies.txt path
-ONLYFANS_COOKIES_FILE = ""  # optional Netscape cookies.txt path for direct media links
 DEFAULT_MEDIA_TYPE = "mp4"
+CLIPBOARD_POPUP = 1
+CLIPBOARD_POPUP_TIMEOUT_SECONDS = 20
+YOUTUBE_CLIPBOARD_LINK_MODE = "auto"  # auto/single/playlist
+COOKIE_BROWSER_FALLBACKS = ("chrome", "edge", "firefox", "brave", "opera", "vivaldi")
+COOKIE_BROWSER_NAMES = {
+    "chrome": "Google Chrome",
+    "edge": "Microsoft Edge",
+    "firefox": "Mozilla Firefox",
+    "brave": "Brave",
+    "opera": "Opera",
+    "vivaldi": "Vivaldi",
+}
 LARGE_FILE_EXTENSIONS = (".zip", ".rar", ".7z", ".iso")
 LARGE_FILE_MAX_RETRIES = 10
 LARGE_FILE_CHUNK_SIZE = 1024 * 1024
 _SNEK_FF = "0700000007000000"
-PROGRESS_BAR_WIDTH = 10
+PROGRESS_BAR_WIDTH = 15
 MIN_PROGRESS_BAR_WIDTH = 10
 STATUS_LINE_WIDTH = 72
 STATUS_TITLE_WIDTH = 22
 STATUS_CLEAR_SEQUENCE = "\033[2K\r"
+STATUS_BLOCK_LINES = 0
 LOG_DIR = Path("logs")
 ERROR_LOG_FILE = LOG_DIR / "log_error_data.txt"
 COMMON_ERROR_HINTS = [
@@ -242,6 +283,20 @@ def t(key: str, **kwargs: object) -> str:
 
 ERROR_DEFINITIONS = [
     {
+        "name": "Material prywatny lub wymagajacy cookies",
+        "keywords": [
+            "private video",
+            "sign in",
+            "cookies-from-browser",
+            "cookies for the authentication",
+            "use --cookies",
+            "login required",
+            "requires login",
+        ],
+        "reason": "Material wymaga zalogowanej sesji albo jest prywatny. Bez poprawnych cookies serwis nie pozwoli pobrac pliku.",
+        "repair": "Program sprobuje automatycznie cookies z przegladarki i pliku cookies.txt. Jesli nadal sie nie uda, zaloguj sie w przegladarce albo umiesc aktualny cookies.txt w folderze programu lub config.",
+    },
+    {
         "name": "HTTP 403 Forbidden",
         "keywords": ["http error 403", "403: forbidden", "403 forbidden", "unable to download video data"],
         "reason": "Serwis odrzucil pobieranie danych wideo. Najczesciej oznacza to blokade po stronie YouTube/serwisu, nieaktualny yt-dlp, ograniczenie regionalne, cookies albo chwilowa blokade adresu IP.",
@@ -311,6 +366,7 @@ ERROR_DEFINITIONS = [
 NAUGHTY_SITE_HINTS = {
     "pornhub.com": ("pornhub", "Pornhub"),
     "beeg.com": ("beeg", "Beeg"),
+    "hqporner.com": ("hqporner", "HQPorner"),
     "xvideos.com": ("xvideos", "XVideos"),
     "xhamster.com": ("xhamster", "xHamster"),
     "xnxx.com": ("xnxx", "XNXX"),
@@ -336,7 +392,6 @@ SUPPORTED_SITE_HINTS = {
     "facebook.com": "Facebook",
     "fb.com": "Facebook",
     "fb.watch": "Facebook",
-    "onlyfans.com": "OnlyFans",
     "spotify.com": "Spotify",
     "open.spotify.com": "Spotify",
     "drive.google.com": "Google Drive",
@@ -360,11 +415,22 @@ GODMODE_URL = "https://www.youtube.com/watch?v=tnROqOCwVVY"
 CONVERSION_STATUS_STOP = threading.Event()
 CONVERSION_STATUS_THREAD: threading.Thread | None = None
 CONVERSION_STATUS_TITLE = "Konwertowanie"
+CONVERSION_STATUS_FULLSCREEN = False
 DOWNLOAD_CANCEL_REQUESTED = False
 COMPLETED_DOWNLOAD_KEYS: set[str] = set()
 COMPLETED_DOWNLOAD_TITLES: list[str] = []
 COMPLETED_DOWNLOAD_FILES: list[str] = []
 DOWNLOAD_STAT_KEYS = ("total", "spotify", "youtube", "naughties", *NAUGHTY_STAT_KEYS, "other")
+TOTAL_USAGE_SECONDS = 0
+SESSION_STARTED_AT = time.time()
+CLIPBOARD_WATCHER_STOP = threading.Event()
+CLIPBOARD_WATCHER_THREAD: threading.Thread | None = None
+CLIPBOARD_WATCHER_LAST_URL = ""
+CLIPBOARD_PROMPT_LOCK = threading.Lock()
+CLIPBOARD_DOWNLOAD_LOCK = threading.Lock()
+CLIPBOARD_STATUS_LAST_URL = ""
+CLIPBOARD_STATUS_QUEUE_COUNT = 0
+STATUS_LOCK = threading.RLock()
 
 
 class DownloadCancelled(Exception):
@@ -401,7 +467,6 @@ def ask_download_type_choice() -> str:
         "2": t("mp4"),
         "3": t("photos"),
         "4": t("spotify"),
-        "5": t("onlyfans"),
     }
     default_choice = "1" if DEFAULT_MEDIA_TYPE == "mp3" else "2"
     while True:
@@ -458,10 +523,16 @@ def handle_easter_egg(value: str) -> bool:
         show_command_help()
         return True
     if command == "stats":
+        clear_console()
+        print_app_header()
         show_download_stats()
+        input(t("continue_prompt"))
         return True
     if command == "stats naughties":
+        clear_console()
+        print_app_header()
         show_download_stats(show_naughties=True)
+        input(t("continue_prompt"))
         return True
     if command == "sites":
         show_supported_sites()
@@ -499,6 +570,9 @@ def handle_easter_egg(value: str) -> bool:
         return True
     if command == "resume":
         resume_large_file_queue()
+        return True
+    if command == "clipboard":
+        prompt_clipboard_queue(DEFAULT_DOWNLOAD_DIR)
         return True
     if command == "konami":
         print(t("konami"))
@@ -547,6 +621,7 @@ def show_command_help() -> None:
     print(t("help_ping"))
     print(t("help_file"))
     print(t("help_resume"))
+    print(t("help_clipboard"))
     print()
 
 
@@ -590,7 +665,6 @@ def run_doctor() -> None:
     doctor_line("yt-dlp", yt_dlp is not None)
     doctor_line("gallery-dl", has_gallery_dl())
     doctor_line("spotDL", has_spotdl())
-    doctor_line("OF-Scraper", has_ofscraper())
     doctor_line("Rich/Textual", Console is not None and importlib.util.find_spec("textual") is not None)
     doctor_line("browser-cookie3", browser_cookie3 is not None)
     doctor_line("BeautifulSoup/lxml", BeautifulSoup is not None and lxml is not None)
@@ -621,7 +695,6 @@ def show_supported_sites() -> None:
         "TikTok",
         "Facebook",
         "Spotify",
-        "OnlyFans",
     ]
     naughty_sites = [label for _domain, (_site_key, label) in NAUGHTY_SITE_HINTS.items()]
     print()
@@ -702,6 +775,16 @@ def db_set_json(key: str, value: dict[str, object]) -> None:
         return
 
 
+def db_delete_key(key: str) -> None:
+    try:
+        init_database()
+        with sqlite3.connect(DATABASE_FILE) as conn:
+            conn.execute("DELETE FROM kv WHERE key = ?", (key,))
+            conn.commit()
+    except (sqlite3.Error, OSError):
+        return
+
+
 def get_config_file() -> Path:
     if LOCAL_CONFIG_FILE.exists():
         return LOCAL_CONFIG_FILE
@@ -714,48 +797,40 @@ def get_config_data() -> dict[str, object]:
     return {
         "lang": LANG,
         "debug": DEBUG,
+        "popup": CLIPBOARD_POPUP,
+        "total_usage_seconds": TOTAL_USAGE_SECONDS,
         "default_download_dir": str(DEFAULT_DOWNLOAD_DIR),
         "default_media_type": DEFAULT_MEDIA_TYPE,
         "facebook_cookies_from_browser": FACEBOOK_COOKIES_FROM_BROWSER,
         "facebook_cookies_file": FACEBOOK_COOKIES_FILE,
-        "onlyfans_cookies_file": ONLYFANS_COOKIES_FILE,
+        "youtube_clipboard_link_mode": YOUTUBE_CLIPBOARD_LINK_MODE,
     }
 
 
 def save_config() -> None:
     data = get_config_data()
     db_set_json("config", data)
-    for path in (LOCAL_CONFIG_FILE, CONFIG_FILE):
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            return
-        except OSError:
-            continue
 
 
 def load_config() -> None:
-    global DEBUG, LANG, DEFAULT_DOWNLOAD_DIR, DEFAULT_MEDIA_TYPE
-    global FACEBOOK_COOKIES_FROM_BROWSER, FACEBOOK_COOKIES_FILE, ONLYFANS_COOKIES_FILE
+    global DEBUG, LANG, DEFAULT_DOWNLOAD_DIR, DEFAULT_MEDIA_TYPE, CLIPBOARD_POPUP
+    global FACEBOOK_COOKIES_FROM_BROWSER, FACEBOOK_COOKIES_FILE
+    global YOUTUBE_CLIPBOARD_LINK_MODE
+    global TOTAL_USAGE_SECONDS
 
-    path = get_config_file()
-    if not path.exists():
-        db_config = db_get_json("config")
-        if db_config:
-            data = db_config
-        else:
+    db_config = db_get_json("config")
+    if db_config:
+        data = db_config
+    else:
+        path = get_config_file()
+        if not path.exists():
             save_config()
             return
-    else:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            db_config = db_get_json("config")
-            if db_config:
-                data = db_config
-            else:
-                save_config()
-                return
+            save_config()
+            return
 
     if not isinstance(data, dict):
         save_config()
@@ -768,6 +843,14 @@ def load_config() -> None:
         DEBUG = 1 if int(data.get("debug", DEBUG)) else 0
     except (TypeError, ValueError):
         DEBUG = 0
+    try:
+        CLIPBOARD_POPUP = 1 if int(data.get("popup", CLIPBOARD_POPUP)) else 0
+    except (TypeError, ValueError):
+        CLIPBOARD_POPUP = 1
+    try:
+        TOTAL_USAGE_SECONDS = max(0, int(float(data.get("total_usage_seconds", TOTAL_USAGE_SECONDS))))
+    except (TypeError, ValueError):
+        TOTAL_USAGE_SECONDS = 0
 
     configured_dir = str(data.get("default_download_dir", DEFAULT_DOWNLOAD_DIR)).strip()
     if configured_dir:
@@ -777,13 +860,16 @@ def load_config() -> None:
         DEFAULT_MEDIA_TYPE = media_type
     FACEBOOK_COOKIES_FROM_BROWSER = str(data.get("facebook_cookies_from_browser", FACEBOOK_COOKIES_FROM_BROWSER)).strip()
     FACEBOOK_COOKIES_FILE = str(data.get("facebook_cookies_file", FACEBOOK_COOKIES_FILE)).strip()
-    ONLYFANS_COOKIES_FILE = str(data.get("onlyfans_cookies_file", ONLYFANS_COOKIES_FILE)).strip()
-    db_set_json("config", get_config_data())
+    youtube_clipboard_mode = str(data.get("youtube_clipboard_link_mode", YOUTUBE_CLIPBOARD_LINK_MODE)).strip().lower()
+    if youtube_clipboard_mode in {"auto", "single", "playlist"}:
+        YOUTUBE_CLIPBOARD_LINK_MODE = youtube_clipboard_mode
+    save_config()
 
 
 def show_settings_menu() -> None:
-    global DEBUG, LANG, DEFAULT_DOWNLOAD_DIR, DEFAULT_MEDIA_TYPE
-    global FACEBOOK_COOKIES_FROM_BROWSER, FACEBOOK_COOKIES_FILE, ONLYFANS_COOKIES_FILE
+    global DEBUG, LANG, DEFAULT_DOWNLOAD_DIR, DEFAULT_MEDIA_TYPE, CLIPBOARD_POPUP
+    global FACEBOOK_COOKIES_FROM_BROWSER, FACEBOOK_COOKIES_FILE
+    global YOUTUBE_CLIPBOARD_LINK_MODE
 
     while True:
         print()
@@ -794,14 +880,24 @@ def show_settings_menu() -> None:
             "2": f"{t('settings_debug')}: {DEBUG}",
             "3": f"{t('settings_download_dir')}: {DEFAULT_DOWNLOAD_DIR}",
             "4": f"{t('settings_default_media')}: {DEFAULT_MEDIA_TYPE}",
-            "5": f"{t('settings_fb_browser')}: {FACEBOOK_COOKIES_FROM_BROWSER}",
-            "6": f"{t('settings_fb_file')}: {FACEBOOK_COOKIES_FILE or '-'}",
-            "7": f"{t('settings_of_file')}: {ONLYFANS_COOKIES_FILE or '-'}",
-            "8": t("back_to_menu").strip(),
+            "5": f"{t('settings_popup')}: {CLIPBOARD_POPUP}",
+            "6": f"{t('settings_fb_browser')}: {FACEBOOK_COOKIES_FROM_BROWSER}",
+            "7": f"{t('settings_fb_file')}: {FACEBOOK_COOKIES_FILE or '-'}",
+            "8": t("settings_import_cookies"),
+            "9": f"{t('settings_youtube_clipboard_mode')}: {YOUTUBE_CLIPBOARD_LINK_MODE}",
+            "10": t("back_to_menu").strip(),
         }
         choice = ask_choice(t("settings_title"), options)
-        if choice == "8":
+        if choice == "10":
             return
+
+        if choice == "8":
+            ok, _browser, message = import_cookies_from_default_browser()
+            print(message)
+            if not ok:
+                print(t("cookies_import_hint"))
+            input(t("continue_prompt"))
+            continue
 
         value = input(t("settings_prompt_value")).strip().strip('"')
         if choice == "1" and value.lower() in available_languages:
@@ -816,12 +912,14 @@ def show_settings_menu() -> None:
             DEFAULT_DOWNLOAD_DIR = path
         elif choice == "4" and value.lower() in {"mp3", "mp4"}:
             DEFAULT_MEDIA_TYPE = value.lower()
-        elif choice == "5":
-            FACEBOOK_COOKIES_FROM_BROWSER = value.lower()
+        elif choice == "5" and value in {"0", "1"}:
+            CLIPBOARD_POPUP = int(value)
         elif choice == "6":
-            FACEBOOK_COOKIES_FILE = value
+            FACEBOOK_COOKIES_FROM_BROWSER = value.lower()
         elif choice == "7":
-            ONLYFANS_COOKIES_FILE = value
+            FACEBOOK_COOKIES_FILE = value
+        elif choice == "9" and value.lower() in {"auto", "single", "playlist"}:
+            YOUTUBE_CLIPBOARD_LINK_MODE = value.lower()
         elif value:
             print(t("invalid_choice"))
             continue
@@ -835,46 +933,17 @@ def add_history_entries(urls: Iterable[str], media_type: str, saved_items: Itera
         return
     urls_list = list(urls)
     history_rows: list[dict[str, str]] = []
-    try:
-        HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with HISTORY_FILE.open("a", encoding="utf-8") as file:
-            for index, item in enumerate(items):
-                if len(urls_list) == 1:
-                    source_url = urls_list[0]
-                elif len(urls_list) == len(items):
-                    source_url = urls_list[index]
-                else:
-                    source_url = ""
-                row = {
-                    "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "media_type": media_type,
-                    "site": detect_site(source_url) if source_url else "",
-                    "url": source_url,
-                    "title": item,
-                }
-                history_rows.append(row)
-                file.write(
-                    json.dumps(
-                        row,
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-    except OSError:
-        pass
-
-    if not history_rows:
-        for index, item in enumerate(items):
-            source_url = urls_list[0] if len(urls_list) == 1 else urls_list[index] if len(urls_list) == len(items) else ""
-            history_rows.append(
-                {
-                    "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "media_type": media_type,
-                    "site": detect_site(source_url) if source_url else "",
-                    "url": source_url,
-                    "title": item,
-                }
-            )
+    for index, item in enumerate(items):
+        source_url = urls_list[0] if len(urls_list) == 1 else urls_list[index] if len(urls_list) == len(items) else ""
+        history_rows.append(
+            {
+                "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "media_type": media_type,
+                "site": detect_site(source_url) if source_url else "",
+                "url": source_url,
+                "title": item,
+            }
+        )
 
     try:
         init_database()
@@ -1010,16 +1079,21 @@ def terminal_supports_hyperlinks() -> bool:
     return bool(os.environ.get("WT_SESSION") or os.environ.get("TERM_PROGRAM"))
 
 
+def make_folder_uri(path: Path) -> str:
+    resolved = path.expanduser().resolve()
+    try:
+        return resolved.as_uri()
+    except ValueError:
+        return "file:///" + quote(resolved.as_posix(), safe="/:")
+
+
 def make_folder_hyperlink(path: Path) -> str:
     resolved = path.expanduser().resolve()
     label = str(resolved)
     if not terminal_supports_hyperlinks():
         return label
 
-    try:
-        uri = resolved.as_uri()
-    except ValueError:
-        uri = "file:///" + quote(resolved.as_posix(), safe="/:")
+    uri = make_folder_uri(resolved)
     return f"\033]8;;{uri}\033\\{label}\033]8;;\033\\"
 
 
@@ -1391,6 +1465,8 @@ def print_saved_summary(saved_path: Path, saved_items: Iterable[str] | None = No
     print_file_validation(saved_path, items)
     print()
     print(f"{t('location')}: {make_folder_hyperlink(saved_path)}")
+    if not terminal_supports_hyperlinks():
+        print(f"URI: {make_folder_uri(saved_path)}")
     print()
     COMPLETED_DOWNLOAD_FILES.clear()
 
@@ -1576,12 +1652,12 @@ def start_gothic_music() -> None:
 
 def ensure_hidden_file(path: Path) -> None:
     if os.name == "nt" and path.exists():
-        subprocess.run(["attrib", "+h", str(path)], capture_output=True, text=True)
+        subprocess.run(["attrib", "+h", str(path)], capture_output=True, **SUBPROCESS_TEXT_OPTIONS)
 
 
 def clear_hidden_file(path: Path) -> None:
     if os.name == "nt" and path.exists():
-        subprocess.run(["attrib", "-h", str(path)], capture_output=True, text=True)
+        subprocess.run(["attrib", "-h", str(path)], capture_output=True, **SUBPROCESS_TEXT_OPTIONS)
 
 
 def encode_download_count(value: int) -> str:
@@ -1746,13 +1822,6 @@ def write_stats_config(data: dict[str, object]) -> None:
         ),
     }
     db_set_json("stats", safe_data)
-    for stats_file in (STATS_CONFIG_FILE, LOCAL_STATS_CONFIG_FILE):
-        try:
-            stats_file.parent.mkdir(parents=True, exist_ok=True)
-            stats_file.write_text(json.dumps(safe_data, indent=2), encoding="utf-8")
-            return
-        except OSError:
-            continue
 
 
 def load_legacy_user_stats_count() -> int:
@@ -1894,46 +1963,83 @@ def add_downloaded_files(amount: int = 1, category: str = "other") -> None:
     save_download_breakdown(breakdown)
 
 
-def get_download_rank(count: int) -> str:
+def get_rank_from_scale(count: int, scale: tuple[tuple[int, str], ...], default_key: str) -> str:
     if count > 9000:
         return "OVER 9000!"
 
-    if LANG.lower() == "pl":
-        ranks = (
-            (10, "swiezak"),
-            (100, "nowicjusz"),
-            (500, "regular"),
-            (1000, "kolekcjoner"),
-            (5000, "weteran"),
-        )
-        default_rank = "legenda"
-    else:
-        ranks = (
-            (10, "rookie"),
-            (100, "novice"),
-            (500, "regular"),
-            (1000, "collector"),
-            (5000, "veteran"),
-        )
-        default_rank = "legend"
-
-    for threshold, rank in ranks:
+    for threshold, rank_key in scale:
         if count < threshold:
-            return rank
-    return default_rank
+            return t(rank_key)
+    return t(default_key)
+
+
+def get_overall_download_rank(count: int) -> str:
+    return get_rank_from_scale(
+        count,
+        (
+            (25, "rank_overall_starter"),
+            (100, "rank_overall_downloader"),
+            (300, "rank_overall_collector"),
+            (1000, "rank_overall_archivist"),
+            (3000, "rank_overall_master"),
+            (9001, "rank_overall_legend"),
+        ),
+        "rank_overall_legend",
+    )
+
+
+def get_category_download_rank(count: int) -> str:
+    return get_rank_from_scale(
+        count,
+        (
+            (10, "rank_category_rookie"),
+            (50, "rank_category_regular"),
+            (150, "rank_category_fan"),
+            (500, "rank_category_collector"),
+            (1500, "rank_category_specialist"),
+            (9001, "rank_category_legend"),
+        ),
+        "rank_category_legend",
+    )
 
 
 def get_download_counter_text() -> str:
     count = load_download_count()
-    return t("stats", count=count)
+    return t("stats", count=count, rank=get_overall_download_rank(count))
 
 
-def format_stats_line(label_key: str, count: int) -> str:
+def format_duration(seconds: int | float) -> str:
+    total = max(0, int(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
+
+def get_total_usage_seconds(include_current_session: bool = True) -> int:
+    session_seconds = int(time.time() - SESSION_STARTED_AT) if include_current_session else 0
+    return max(0, int(TOTAL_USAGE_SECONDS) + session_seconds)
+
+
+def save_usage_time() -> None:
+    global TOTAL_USAGE_SECONDS, SESSION_STARTED_AT
+    now = time.time()
+    elapsed = max(0, int(now - SESSION_STARTED_AT))
+    if elapsed:
+        TOTAL_USAGE_SECONDS = max(0, int(TOTAL_USAGE_SECONDS)) + elapsed
+        SESSION_STARTED_AT = now
+        save_config()
+
+
+def format_stats_line(label_key: str, count: int, overall: bool = False) -> str:
     return t(
         "stats_line",
         label=t(label_key),
         count=count,
-        rank=get_download_rank(count),
+        rank=get_overall_download_rank(count) if overall else get_category_download_rank(count),
     )
 
 
@@ -1947,11 +2053,12 @@ def show_download_stats(show_naughties: bool = False) -> None:
             if breakdown[site_key] > 0:
                 print(format_stats_line(f"stats_{site_key}", breakdown[site_key]))
     else:
-        print(format_stats_line("stats_total", breakdown["total"]))
+        print(format_stats_line("stats_total", breakdown["total"], overall=True))
         print(format_stats_line("stats_spotify", breakdown["spotify"]))
         print(format_stats_line("stats_youtube", breakdown["youtube"]))
         print(format_stats_line("stats_naughties", breakdown["naughties"]))
         print(format_stats_line("stats_other", breakdown["other"]))
+        print(t("stats_usage_time", time=format_duration(get_total_usage_seconds())))
         print(t("stats_naughties_hint"))
     print()
 
@@ -2060,13 +2167,40 @@ def normalize_user_url(value: str) -> str:
         "mega.nz/",
         "drive.google.com/",
         "open.spotify.com/",
-        "onlyfans.com/",
         "pornhub.com/",
         "beeg.com/",
     )
     if lowered.startswith(known_prefixes) or lowered.startswith("www."):
         return "https://" + clean
     return clean
+
+
+def is_youtube_watch_url(url: str) -> bool:
+    parsed = urlparse(normalize_user_url(url))
+    host = parsed.netloc.lower().replace("www.", "")
+    return host in {"youtube.com", "m.youtube.com"} and parsed.path.lower() == "/watch"
+
+
+def strip_youtube_playlist_from_watch_url(url: str) -> str:
+    normalized = normalize_user_url(url)
+    if not is_youtube_watch_url(normalized):
+        return normalized
+
+    parsed = urlparse(normalized)
+    cleaned_query = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key.lower() not in {"list", "index", "start_radio"}
+    ]
+    return urlunparse(parsed._replace(query=urlencode(cleaned_query)))
+
+
+def normalize_clipboard_download_url(url: str) -> str:
+    normalized = normalize_user_url(url)
+    mode = YOUTUBE_CLIPBOARD_LINK_MODE.lower()
+    if mode in {"auto", "single"} and is_youtube_watch_url(normalized):
+        return strip_youtube_playlist_from_watch_url(normalized)
+    return normalized
 
 
 def extract_links_from_html(html: str, base_url: str) -> list[str]:
@@ -2383,24 +2517,32 @@ def get_large_file_queue_file() -> Path:
 
 
 def write_large_file_queue(download_dir: Path, current: str, queue: Iterable[str]) -> Path:
+    queue_list = list(queue)
+    db_set_json(
+        "large_file_queue",
+        {
+            "download_dir": str(download_dir),
+            "current": current,
+            "queue": queue_list,
+        },
+    )
     lines = [
         "# VideoDownloader large-file queue",
         "# Do not edit while the app is downloading.",
         f"download_dir={download_dir}",
         f"current={current}",
     ]
-    lines.extend(f"queue={url}" for url in queue)
-    for path in (LOCAL_LARGE_FILE_QUEUE_FILE, LARGE_FILE_QUEUE_FILE):
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            return path
-        except OSError:
-            continue
-    return LOCAL_LARGE_FILE_QUEUE_FILE
+    lines.extend(f"queue={url}" for url in queue_list)
+    try:
+        LARGE_FILE_QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        LARGE_FILE_QUEUE_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return LARGE_FILE_QUEUE_FILE
+    except OSError:
+        return DATABASE_FILE
 
 
 def clear_large_file_queue() -> None:
+    db_delete_key("large_file_queue")
     for path in (LOCAL_LARGE_FILE_QUEUE_FILE, LARGE_FILE_QUEUE_FILE):
         try:
             if path.exists():
@@ -2410,6 +2552,14 @@ def clear_large_file_queue() -> None:
 
 
 def read_large_file_queue() -> tuple[Path, str, list[str]]:
+    data = db_get_json("large_file_queue")
+    if data:
+        download_dir = Path(str(data.get("download_dir", DEFAULT_DOWNLOAD_DIR))).expanduser()
+        current = str(data.get("current", "") or "")
+        raw_queue = data.get("queue", [])
+        queue = [str(item) for item in raw_queue] if isinstance(raw_queue, list) else []
+        return download_dir, current, queue
+
     path = get_large_file_queue_file()
     if not path.exists():
         return DEFAULT_DOWNLOAD_DIR, "", []
@@ -2433,6 +2583,8 @@ def read_large_file_queue() -> tuple[Path, str, list[str]]:
                 queue.append(value)
     except OSError:
         return DEFAULT_DOWNLOAD_DIR, "", []
+    if current or queue:
+        write_large_file_queue(download_dir, current, queue)
     return download_dir, current, queue
 
 
@@ -2532,12 +2684,16 @@ def move_partial_to_new_download_dir(
 def render_file_progress(name: str, downloaded: int, total: int | None, started_at: float) -> None:
     percent = downloaded / total * 100 if total else None
     speed = downloaded / max(0.001, time.perf_counter() - started_at)
-    if percent is None:
-        line = f"{shorten_text(name, STATUS_TITLE_WIDTH)} {make_progress_bar(None)}   ?.?% "
-    else:
-        line = f"{shorten_text(name, STATUS_TITLE_WIDTH)} {make_progress_bar(percent)} {percent:6.2f}% "
-    line += f"{format_mb(downloaded)}/{format_mb(total)} {format_speed(speed)}"
-    print(STATUS_CLEAR_SEQUENCE + shorten_text(line, STATUS_LINE_WIDTH), end="", flush=True)
+    eta = (total - downloaded) / max(speed, 0.001) if total else None
+    percent_text = f"{percent:.0f}%" if percent is not None else "--%"
+    print_status_block(
+        [
+            shorten_text(name, STATUS_LINE_WIDTH),
+            f"{make_progress_bar(percent, PROGRESS_BAR_WIDTH)} {percent_text}",
+            f"{format_mb_compact(downloaded)}/{format_mb_compact(total)} {format_speed(speed)}",
+            f"ETA {format_seconds(eta)}",
+        ]
+    )
 
 
 def download_large_file(
@@ -2753,6 +2909,366 @@ def resume_large_file_queue() -> None:
         print_saved_summary(download_dir, saved_items)
 
 
+def get_clipboard_text() -> str:
+    if tk is not None:
+        root = None
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            value = root.clipboard_get()
+            return str(value or "")
+        except Exception:
+            pass
+        finally:
+            if root is not None:
+                try:
+                    root.destroy()
+                except Exception:
+                    pass
+
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw"],
+            capture_output=True,
+            timeout=3,
+            **SUBPROCESS_TEXT_OPTIONS,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def is_recognized_clipboard_url(url: str) -> bool:
+    if validate_url(url) is not None:
+        return False
+    parsed = urlparse(normalize_user_url(url))
+    host = parsed.netloc.lower().removeprefix("www.")
+    for domain in SUPPORTED_SITE_HINTS:
+        if host == domain or host.endswith(f".{domain}"):
+            return True
+    return False
+
+
+def extract_clipboard_url(text: str) -> str | None:
+    for token in re.findall(r"https?://[^\s<>()\[\]{}'\"|]+|www\.[^\s<>()\[\]{}'\"|]+", text or ""):
+        clean = normalize_clipboard_download_url(token.strip().strip(",;"))
+        if clean and is_recognized_clipboard_url(clean):
+            return clean
+    for token in re.split(r"[\s<>()\[\]{}'\"|]+", text or ""):
+        clean = normalize_clipboard_download_url(token.strip().strip(",;"))
+        if clean and is_recognized_clipboard_url(clean):
+            return clean
+    return None
+
+
+def is_naughty_url(url: str) -> bool:
+    parsed = urlparse(normalize_user_url(url))
+    host = parsed.netloc.lower().removeprefix("www.")
+    return any(host == domain or host.endswith(f".{domain}") for domain in NAUGHTY_SITE_HINTS)
+
+
+def get_clipboard_media_type(url: str) -> str:
+    return "mp4" if is_naughty_url(url) else DEFAULT_MEDIA_TYPE
+
+
+def clear_clipboard_queue() -> None:
+    db_delete_key("clipboard_queue")
+    try:
+        CLIPBOARD_QUEUE_FILE.unlink(missing_ok=True)
+    except OSError:
+        return
+
+
+def read_clipboard_queue() -> list[str]:
+    data = db_get_json("clipboard_queue")
+    if data:
+        raw_urls = data.get("urls", [])
+        if isinstance(raw_urls, list):
+            return [
+                normalize_clipboard_download_url(str(url))
+                for url in raw_urls
+                if normalize_clipboard_download_url(str(url))
+                and is_recognized_clipboard_url(normalize_clipboard_download_url(str(url)))
+            ]
+
+    try:
+        if not CLIPBOARD_QUEUE_FILE.exists():
+            return []
+        urls: list[str] = []
+        for line in CLIPBOARD_QUEUE_FILE.read_text(encoding="utf-8").splitlines():
+            url = normalize_clipboard_download_url(line.strip())
+            if url and is_recognized_clipboard_url(url) and url not in urls:
+                urls.append(url)
+        if urls:
+            db_set_json("clipboard_queue", {"urls": urls})
+        return urls
+    except OSError:
+        return []
+
+
+def add_clipboard_queue_url(url: str) -> int:
+    global CLIPBOARD_STATUS_LAST_URL, CLIPBOARD_STATUS_QUEUE_COUNT
+    normalized = normalize_clipboard_download_url(url)
+    urls = read_clipboard_queue()
+    if normalized not in urls:
+        urls.append(normalized)
+    CLIPBOARD_STATUS_LAST_URL = normalized
+    CLIPBOARD_STATUS_QUEUE_COUNT = len(urls)
+    db_set_json("clipboard_queue", {"urls": urls})
+    try:
+        CLIPBOARD_QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        CLIPBOARD_QUEUE_FILE.write_text("\n".join(urls) + ("\n" if urls else ""), encoding="utf-8")
+    except OSError:
+        return len(urls)
+    return len(urls)
+
+
+def confirm_clipboard_popup(url: str, media_type: str) -> bool | None:
+    if tk is None:
+        return None
+
+    result: dict[str, bool | None] = {"value": None}
+    root = None
+    try:
+        root = tk.Tk()
+        root.title(t("clipboard_popup_title"))
+        root.resizable(False, False)
+        root.attributes("-topmost", True)
+
+        frame = tk.Frame(root, padx=18, pady=14)
+        frame.pack(fill="both", expand=True)
+        tk.Label(
+            frame,
+            text=t("clipboard_popup_body", url=url, media=media_type.upper()),
+            justify="left",
+            wraplength=520,
+        ).pack(anchor="w")
+        tk.Label(
+            frame,
+            text=t("clipboard_popup_timeout", seconds=CLIPBOARD_POPUP_TIMEOUT_SECONDS),
+            justify="left",
+            wraplength=520,
+        ).pack(anchor="w", pady=(8, 0))
+
+        buttons = tk.Frame(frame)
+        buttons.pack(anchor="e", pady=(14, 0))
+
+        def finish(value: bool | None) -> None:
+            result["value"] = value
+            root.destroy()
+
+        tk.Button(buttons, text=t("yes"), width=12, command=lambda: finish(True)).pack(side="left", padx=(0, 8))
+        tk.Button(buttons, text=t("no"), width=12, command=lambda: finish(False)).pack(side="left", padx=(0, 8))
+        tk.Button(buttons, text=t("decide_later"), width=18, command=lambda: finish(None)).pack(side="left")
+        root.protocol("WM_DELETE_WINDOW", lambda: finish(None))
+        root.after(CLIPBOARD_POPUP_TIMEOUT_SECONDS * 1000, lambda: finish(None))
+        root.update_idletasks()
+        width = root.winfo_width()
+        height = root.winfo_height()
+        x = max(0, (root.winfo_screenwidth() - width) // 2)
+        y = max(0, (root.winfo_screenheight() - height) // 2)
+        root.geometry(f"+{x}+{y}")
+        root.mainloop()
+        return result["value"]
+    except Exception:
+        if root is not None:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+        return None
+
+
+def confirm_clipboard_download(url: str, media_type: str) -> bool | None:
+    if CLIPBOARD_POPUP:
+        return confirm_clipboard_popup(url, media_type)
+
+    answer = input(t("clipboard_console_prompt", url=url, media=media_type.upper())).strip().lower()
+    if not answer:
+        return None
+    if answer in {"y", "yes", "t", "tak"}:
+        return True
+    return False
+
+
+def download_clipboard_url(url: str, download_dir: Path) -> list[str]:
+    media_type = get_clipboard_media_type(url)
+    normalized = normalize_user_url(url)
+    source_type = "auto"
+
+    if is_spotify_url(normalized):
+        saved_items = download_spotify_with_spotdl([normalized], download_dir)
+        if saved_items:
+            add_history_entries([normalized], "spotify", saved_items)
+            print_saved_summary(download_dir / "Spotify", saved_items)
+        return saved_items
+
+    if is_youtube_channel_url(normalized):
+        source_type = "channel"
+        print(t("detected_channel"))
+        if not preflight_channel_download(normalized, media_type):
+            print(t("channel_cancelled"))
+            return []
+    elif is_youtube_playlist_url(normalized):
+        source_type = "playlist"
+        print(t("detected_playlist"))
+        if not preflight_playlist_download(normalized, media_type):
+            print(t("playlist_cancelled"))
+            return []
+
+    saved_items = download([normalized], media_type, source_type, download_dir)
+    if saved_items:
+        add_history_entries([normalized], media_type, saved_items)
+        print_saved_summary(download_dir, saved_items)
+    return saved_items
+
+
+def download_clipboard_queue(download_dir: Path) -> None:
+    urls = read_clipboard_queue()
+    if not urls:
+        print(t("clipboard_queue_empty"))
+        return
+    total_saved = 0
+    for url in urls:
+        saved_items = download_clipboard_url(url, download_dir)
+        total_saved += len(saved_items)
+    clear_clipboard_queue()
+    print(t("clipboard_queue_done", count=total_saved))
+
+
+def prompt_clipboard_queue(download_dir: Path) -> None:
+    urls = read_clipboard_queue()
+    if not urls:
+        return
+    print()
+    print(t("clipboard_queue_pending", count=len(urls), path=CLIPBOARD_QUEUE_FILE))
+    choice = ask_choice(
+        t("clipboard_queue_action"),
+        {
+            "1": t("clipboard_queue_download_all"),
+            "2": t("clipboard_queue_delete"),
+            "3": t("clipboard_queue_later"),
+        },
+    )
+    if choice == "1":
+        download_clipboard_queue(download_dir)
+    elif choice == "2":
+        clear_clipboard_queue()
+        print(t("clipboard_queue_deleted"))
+
+
+def handle_clipboard_url(url: str, background: bool = False) -> None:
+    global CLIPBOARD_STATUS_LAST_URL, CLIPBOARD_STATUS_QUEUE_COUNT
+    url = normalize_clipboard_download_url(url)
+    CLIPBOARD_STATUS_LAST_URL = url
+    CLIPBOARD_STATUS_QUEUE_COUNT = len(read_clipboard_queue())
+    media_type = get_clipboard_media_type(url)
+    download_dir = DEFAULT_DOWNLOAD_DIR
+    download_dir.mkdir(parents=True, exist_ok=True)
+
+    if background and not CLIPBOARD_POPUP:
+        count = add_clipboard_queue_url(url)
+        CLIPBOARD_STATUS_QUEUE_COUNT = count
+        return
+
+    if background and not CLIPBOARD_PROMPT_LOCK.acquire(blocking=False):
+        CLIPBOARD_STATUS_QUEUE_COUNT = add_clipboard_queue_url(url)
+        return
+
+    try:
+        if not background:
+            print(t("clipboard_detected", url=url))
+        decision = confirm_clipboard_download(url, media_type)
+        if decision is True:
+            with CLIPBOARD_DOWNLOAD_LOCK:
+                download_clipboard_url(url, download_dir)
+            clear_clipboard_queue()
+            CLIPBOARD_STATUS_QUEUE_COUNT = 0
+        elif decision is None:
+            count = add_clipboard_queue_url(url)
+            CLIPBOARD_STATUS_QUEUE_COUNT = count
+            if not background:
+                print(t("clipboard_queued", count=count, path=CLIPBOARD_QUEUE_FILE))
+            if not background:
+                prompt_clipboard_queue(download_dir)
+        else:
+            if not background:
+                print(t("clipboard_ignored"))
+    finally:
+        if background:
+            try:
+                CLIPBOARD_PROMPT_LOCK.release()
+            except RuntimeError:
+                pass
+
+
+def clipboard_watcher_loop() -> None:
+    global CLIPBOARD_WATCHER_LAST_URL
+
+    CLIPBOARD_WATCHER_LAST_URL = extract_clipboard_url(get_clipboard_text()) or ""
+    while not CLIPBOARD_WATCHER_STOP.is_set():
+        text = get_clipboard_text()
+        url = extract_clipboard_url(text)
+        if url and url != CLIPBOARD_WATCHER_LAST_URL:
+            CLIPBOARD_WATCHER_LAST_URL = url
+            handle_clipboard_url(url, background=True)
+        CLIPBOARD_WATCHER_STOP.wait(1)
+
+
+def start_background_clipboard_watcher() -> None:
+    global CLIPBOARD_WATCHER_THREAD
+    if CLIPBOARD_WATCHER_THREAD is not None and CLIPBOARD_WATCHER_THREAD.is_alive():
+        return
+    CLIPBOARD_WATCHER_STOP.clear()
+    CLIPBOARD_WATCHER_THREAD = threading.Thread(
+        target=clipboard_watcher_loop,
+        name="clipboard-watcher",
+        daemon=True,
+    )
+    CLIPBOARD_WATCHER_THREAD.start()
+
+
+def stop_background_clipboard_watcher() -> None:
+    CLIPBOARD_WATCHER_STOP.set()
+    thread = CLIPBOARD_WATCHER_THREAD
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=2)
+
+
+def run_clipboard_watcher() -> None:
+    clear_console()
+    print_app_header()
+    print()
+    print(t("clipboard_watcher_title"))
+    print(t("clipboard_watcher_hint", media=DEFAULT_MEDIA_TYPE.upper(), folder=DEFAULT_DOWNLOAD_DIR))
+    print(t("clipboard_watcher_stop"))
+    print(t("clipboard_queue_autoclear"))
+
+    last_text = get_clipboard_text()
+    last_url = extract_clipboard_url(last_text) or ""
+    download_dir = DEFAULT_DOWNLOAD_DIR
+    download_dir.mkdir(parents=True, exist_ok=True)
+
+    while True:
+        if msvcrt is not None and msvcrt.kbhit():
+            key = msvcrt.getwch().lower()
+            if key == "q":
+                print(t("clipboard_watcher_stopped"))
+                return
+
+        text = get_clipboard_text()
+        url = extract_clipboard_url(text)
+        if url and url != last_url:
+            last_url = url
+            handle_clipboard_url(url, background=False)
+            print()
+            print(t("clipboard_watcher_resume"))
+
+        time.sleep(1)
+
+
 def validate_url(value: str) -> str | None:
     clean = normalize_user_url(value)
     if not clean:
@@ -2807,11 +3323,6 @@ def is_facebook_reel_url(url: str) -> bool:
     if host not in {"facebook.com", "m.facebook.com", "fb.com"} and not host.endswith(".facebook.com"):
         return False
     return parsed.path.strip("/").startswith("reel/")
-
-
-def is_onlyfans_url(url: str) -> bool:
-    host = urlparse(url).netloc.lower().removeprefix("www.")
-    return host == "onlyfans.com" or host.endswith(".onlyfans.com")
 
 
 def get_direct_media_extension(url: str) -> str | None:
@@ -2877,6 +3388,183 @@ def load_cookie_header_from_browser(browser: str, url: str) -> str:
         if cookie_domain and (host == cookie_domain or host.endswith(f".{cookie_domain}")):
             pairs.append(f"{cookie.name}={cookie.value}")
     return "; ".join(pairs)
+
+
+def detect_default_browser() -> str:
+    if winreg is None:
+        return ""
+    keys = [
+        r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice",
+        r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice",
+    ]
+    mapping = {
+        "googlechrome": "chrome",
+        "chromehtml": "chrome",
+        "chrome": "chrome",
+        "chromium": "chrome",
+        "microsoftedge": "edge",
+        "microsoft-edge": "edge",
+        "msedge": "edge",
+        "microsoft-edge-url": "edge",
+        "edge": "edge",
+        "firefoxurl": "firefox",
+        "firefoxhtml": "firefox",
+        "firefox": "firefox",
+        "bravehtml": "brave",
+        "brave": "brave",
+        "operastable": "opera",
+        "operagx": "opera",
+        "opera": "opera",
+        "vivaldihtm": "vivaldi",
+        "vivaldi": "vivaldi",
+    }
+    for key in keys:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as handle:
+                prog_id = str(winreg.QueryValueEx(handle, "ProgId")[0]).lower()
+        except OSError:
+            continue
+        for needle, browser in mapping.items():
+            if needle in prog_id:
+                return browser
+    return ""
+
+
+def browser_loader(browser: str):
+    if browser_cookie3 is None:
+        return None
+    return getattr(browser_cookie3, browser.lower(), None)
+
+
+def browser_label(browser: str) -> str:
+    return COOKIE_BROWSER_NAMES.get(browser.lower(), browser)
+
+
+def load_browser_cookie_jar(browser: str):
+    loader = browser_loader(browser)
+    if loader is None:
+        return None
+    return loader()
+
+
+def ensure_python_import(package_name: str, import_name: str) -> bool:
+    try:
+        globals()[import_name] = importlib.import_module(import_name)
+        return True
+    except ImportError:
+        pass
+
+    try:
+        LOCAL_PACKAGE_DIR.mkdir(parents=True, exist_ok=True)
+        if str(LOCAL_PACKAGE_DIR) not in sys.path:
+            sys.path.insert(0, str(LOCAL_PACKAGE_DIR))
+        command = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "--target",
+            str(LOCAL_PACKAGE_DIR),
+            "--no-input",
+            "--disable-pip-version-check",
+            package_name,
+        ]
+        result = subprocess.run(command, capture_output=True, timeout=180, **SUBPROCESS_TEXT_OPTIONS)
+        if result.returncode != 0:
+            command = [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "--user",
+                "--no-input",
+                "--disable-pip-version-check",
+                package_name,
+            ]
+            result = subprocess.run(command, capture_output=True, timeout=180, **SUBPROCESS_TEXT_OPTIONS)
+            if result.returncode != 0:
+                return False
+        importlib.invalidate_caches()
+        globals()[import_name] = importlib.import_module(import_name)
+        return True
+    except Exception:
+        return False
+
+
+def export_cookie_jar_to_netscape(jar, output_file: Path) -> int:
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        "# Netscape HTTP Cookie File",
+        "# Generated by Video Downloader. Keep this file private.",
+        "",
+    ]
+    count = 0
+    for cookie in jar:
+        domain = str(getattr(cookie, "domain", "") or "")
+        name = str(getattr(cookie, "name", "") or "")
+        value = str(getattr(cookie, "value", "") or "")
+        path = str(getattr(cookie, "path", "") or "/")
+        if not domain or not name:
+            continue
+        include_subdomains = "TRUE" if domain.startswith(".") else "FALSE"
+        secure = "TRUE" if bool(getattr(cookie, "secure", False)) else "FALSE"
+        expires = getattr(cookie, "expires", None)
+        expiry = str(int(expires)) if expires else "0"
+        rows.append("\t".join([domain, include_subdomains, path, secure, expiry, name, value]))
+        count += 1
+    output_file.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return count
+
+
+def import_cookies_from_default_browser() -> tuple[bool, str, str]:
+    global FACEBOOK_COOKIES_FROM_BROWSER, FACEBOOK_COOKIES_FILE
+    global browser_cookie3
+
+    if browser_cookie3 is None and not ensure_python_import("browser-cookie3", "browser_cookie3"):
+        return False, "", t("cookies_import_missing_dependency")
+
+    default_browser = detect_default_browser()
+    browsers: list[str] = []
+    if default_browser:
+        browsers.append(default_browser)
+    for browser in COOKIE_BROWSER_FALLBACKS:
+        if browser not in browsers:
+            browsers.append(browser)
+
+    errors: list[str] = []
+    for browser in browsers:
+        try:
+            jar = load_browser_cookie_jar(browser)
+            label = browser_label(browser)
+            if jar is None:
+                errors.append(f"{label}: unsupported")
+                continue
+            output_file = APP_CONFIG_DIR / "cookies.txt"
+            count = export_cookie_jar_to_netscape(jar, output_file)
+            if count <= 0:
+                errors.append(f"{label}: no cookies found")
+                continue
+            FACEBOOK_COOKIES_FROM_BROWSER = browser
+            FACEBOOK_COOKIES_FILE = str(output_file)
+            save_config()
+            return True, browser, t("cookies_import_success", browser=label, count=count, path=output_file)
+        except Exception as exc:
+            errors.append(f"{browser_label(browser)}: {exc}")
+
+    details = "; ".join(errors) if errors else "unknown error"
+    return False, default_browser or "", t("cookies_import_failed", details=details)
+
+
+def run_cookie_import_cli() -> int:
+    load_config()
+    ok, _browser, message = import_cookies_from_default_browser()
+    print(message)
+    if ok:
+        return 0
+    print(t("cookies_import_hint"))
+    return 1
 
 
 def has_invalid_windows_path_chars(value: str) -> bool:
@@ -2971,12 +3659,29 @@ def classify_error(error_text: str) -> dict:
     }
 
 
+def sanitize_error_text(error: object) -> str:
+    text = str(error)
+    text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    text = re.sub(r"\s+See\s+https?://\S+.*", "", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"\s+Also see\s+https?://\S+.*", "", text, flags=re.IGNORECASE | re.DOTALL)
+    text = text.replace("ERROR: ERROR:", "ERROR:")
+    return text.strip()
+
+
+def format_user_error(error: object) -> str:
+    clean = sanitize_error_text(error)
+    details = classify_error(clean)
+    if details["name"] != "Nieznany blad":
+        return details["name"]
+    return clean
+
+
 def suggest_repair(error_text: str) -> str:
     return classify_error(error_text)["repair"]
 
 
 def print_error_details(error: object) -> None:
-    error_text = str(error)
+    error_text = sanitize_error_text(error)
     details = classify_error(error_text)
     print(t("error_type", value=details["name"]))
     print(t("reason", value=details["reason"]))
@@ -3054,11 +3759,19 @@ def shorten_text(value: str, max_length: int) -> str:
 def make_progress_bar(percent: float | None, width: int | None = None) -> str:
     bar_width = width or PROGRESS_BAR_WIDTH
     bar_width = max(MIN_PROGRESS_BAR_WIDTH, bar_width)
+    try:
+        "█░".encode(sys.stdout.encoding or "utf-8")
+        filled_char = "█"
+        empty_char = "░"
+    except (LookupError, UnicodeEncodeError):
+        filled_char = "#"
+        empty_char = "-"
+
     if percent is None:
-        return "[" + "." * bar_width + "]"
+        return empty_char * bar_width
 
     done = int(bar_width * max(0, min(percent, 100)) / 100)
-    return "[" + "#" * done + "." * (bar_width - done) + "]"
+    return filled_char * done + empty_char * (bar_width - done)
 
 
 def get_download_percent(progress: dict) -> float | None:
@@ -3072,7 +3785,14 @@ def get_download_percent(progress: dict) -> float | None:
 def format_mb(bytes_value: float | int | None) -> str:
     if bytes_value is None:
         return "? MB"
-    return f"{bytes_value / (1024 * 1024):.2f} MB"
+    mb_value = bytes_value / (1024 * 1024)
+    if mb_value >= 100 or mb_value.is_integer():
+        return f"{mb_value:.0f} MB"
+    return f"{mb_value:.1f} MB"
+
+
+def format_mb_compact(bytes_value: float | int | None) -> str:
+    return format_mb(bytes_value).replace(" ", "")
 
 
 def format_gb_or_mb(bytes_value: float | int | None) -> str:
@@ -3086,18 +3806,70 @@ def format_gb_or_mb(bytes_value: float | int | None) -> str:
 def get_size_progress(progress: dict) -> str:
     downloaded = progress.get("downloaded_bytes")
     total = progress.get("total_bytes") or progress.get("total_bytes_estimate")
-    return f"{format_mb(downloaded)}/{format_mb(total)}"
+    return f"{format_mb_compact(downloaded)}/{format_mb_compact(total)}"
 
 
 def format_speed(bytes_per_second: float | int | None) -> str:
     if bytes_per_second is None:
         return "? MB/s"
-    return f"{bytes_per_second / (1024 * 1024):.2f} MB/s"
+    return f"{bytes_per_second / (1024 * 1024):.1f} MB/s"
+
+
+def get_eta_text(progress: dict) -> str:
+    eta = progress.get("eta")
+    if eta is not None:
+        return format_seconds(eta)
+
+    total = progress.get("total_bytes") or progress.get("total_bytes_estimate")
+    downloaded = progress.get("downloaded_bytes")
+    speed = progress.get("speed")
+    if total and downloaded is not None and speed:
+        return format_seconds((total - downloaded) / max(float(speed), 0.001))
+    return "--:--"
 
 
 def get_progress_title(progress: dict) -> str:
     info = progress.get("info_dict") or {}
     return info.get("title") or Path(progress.get("filename", "")).stem or t("download_label")
+
+
+def get_collection_position(progress: dict) -> str:
+    info = progress.get("info_dict") or {}
+    index = (
+        info.get("playlist_index")
+        or progress.get("playlist_index")
+        or info.get("__playlist_index")
+        or progress.get("__playlist_index")
+    )
+    total = (
+        info.get("playlist_count")
+        or info.get("n_entries")
+        or progress.get("playlist_count")
+        or progress.get("n_entries")
+    )
+    if index is None and total is None:
+        return ""
+    try:
+        index_text = str(int(index)) if index is not None else "?"
+    except (TypeError, ValueError):
+        index_text = str(index)
+    try:
+        total_text = str(int(total)) if total is not None else "?"
+    except (TypeError, ValueError):
+        total_text = str(total)
+    return t("download_item_counter", current=index_text, total=total_text)
+
+
+def is_collection_progress(progress: dict) -> bool:
+    return bool(get_collection_position(progress))
+
+
+def get_progress_title_line(progress: dict) -> str:
+    title = get_progress_title(progress)
+    position = get_collection_position(progress)
+    if position:
+        return f"{position} | {title}"
+    return title
 
 
 def reset_download_cancel() -> None:
@@ -3145,39 +3917,89 @@ def record_completed_download(progress: dict) -> None:
         COMPLETED_DOWNLOAD_FILES.append(str(filename))
 
 
+def print_status_block(lines: list[str], full_screen: bool = False) -> None:
+    global STATUS_BLOCK_LINES
+
+    with STATUS_LOCK:
+        if full_screen:
+            clear_console()
+            print(t("download_stop_hint"))
+            print()
+            STATUS_BLOCK_LINES = 0
+        if STATUS_BLOCK_LINES:
+            print(f"\033[{STATUS_BLOCK_LINES}F", end="")
+
+        rendered_lines = [shorten_text(line, STATUS_LINE_WIDTH) for line in lines]
+        for line in rendered_lines:
+            print(STATUS_CLEAR_SEQUENCE + line)
+
+        if len(rendered_lines) < STATUS_BLOCK_LINES:
+            for _ in range(STATUS_BLOCK_LINES - len(rendered_lines)):
+                print(STATUS_CLEAR_SEQUENCE)
+
+        STATUS_BLOCK_LINES = len(rendered_lines)
+        print("", end="", flush=True)
+
+
 def print_status_line(text: str) -> None:
-    line = shorten_text(text, STATUS_LINE_WIDTH)
-    print(STATUS_CLEAR_SEQUENCE + line, end="", flush=True)
+    print_status_block([text])
 
 
 def clear_status_line() -> None:
-    print(STATUS_CLEAR_SEQUENCE, end="", flush=True)
+    global STATUS_BLOCK_LINES
+
+    with STATUS_LOCK:
+        if STATUS_BLOCK_LINES:
+            print(f"\033[{STATUS_BLOCK_LINES}F", end="")
+            for _ in range(STATUS_BLOCK_LINES):
+                print(STATUS_CLEAR_SEQUENCE)
+            STATUS_BLOCK_LINES = 0
+        else:
+            print(STATUS_CLEAR_SEQUENCE, end="")
+        print("", end="", flush=True)
 
 
 def print_progress_line(progress: dict) -> None:
     percent = get_download_percent(progress)
     speed = format_speed(progress.get("speed"))
     size_progress = get_size_progress(progress)
-    percent_text = f"{percent:5.1f}%" if percent is not None else "--.-%"
+    percent_text = f"{percent:.0f}%" if percent is not None else "--%"
     bar = make_progress_bar(percent, PROGRESS_BAR_WIDTH)
-    suffix = f" {bar} {percent_text} {size_progress} {speed}"
-    title = shorten_text(get_progress_title(progress), STATUS_TITLE_WIDTH)
-    line = f"{title:<{STATUS_TITLE_WIDTH}}{suffix}"
-    print_status_line(line)
+    title = shorten_text(get_progress_title_line(progress), STATUS_LINE_WIDTH)
+    print_status_block(
+        [
+            title,
+            f"{bar} {percent_text}",
+            f"{size_progress} {speed}",
+            f"ETA {get_eta_text(progress)}",
+        ],
+        full_screen=is_collection_progress(progress),
+    )
 
 
 def print_conversion_line(progress: dict) -> None:
-    suffix = f" {make_progress_bar(100, PROGRESS_BAR_WIDTH)} 100.0% Konwertowanie..."
-    title = shorten_text(get_progress_title(progress), STATUS_TITLE_WIDTH)
-    line = f"{title:<{STATUS_TITLE_WIDTH}}{suffix}"
-    print_status_line(line)
+    print_status_block(
+        [
+            shorten_text(get_progress_title_line(progress), STATUS_LINE_WIDTH),
+            f"{make_progress_bar(100, PROGRESS_BAR_WIDTH)} 100%",
+            t("conversion"),
+            "ETA 00:00",
+        ],
+        full_screen=is_collection_progress(progress),
+    )
 
 
-def print_conversion_status(title: str, started_at: float, frame: str) -> None:
+def print_conversion_status(title: str, started_at: float, frame: str, full_screen: bool = False) -> None:
     elapsed = int(time.monotonic() - started_at)
-    suffix = f" {frame} {t('conversion')} {format_seconds(elapsed)}"
-    line = f"{shorten_text(title, STATUS_TITLE_WIDTH):<{STATUS_TITLE_WIDTH}}{suffix}"
-    print_status_line(line)
+    print_status_block(
+        [
+            shorten_text(title, STATUS_LINE_WIDTH),
+            f"{make_progress_bar(100, PROGRESS_BAR_WIDTH)} 100%",
+            f"{frame} {t('conversion')} {format_seconds(elapsed)}",
+            "ETA 00:00",
+        ],
+        full_screen=full_screen,
+    )
 
 
 def conversion_status_worker() -> None:
@@ -3185,32 +4007,40 @@ def conversion_status_worker() -> None:
     frames = "|/-\\"
     index = 0
     while not CONVERSION_STATUS_STOP.is_set():
-        print_conversion_status(CONVERSION_STATUS_TITLE, started_at, frames[index % len(frames)])
+        print_conversion_status(
+            CONVERSION_STATUS_TITLE,
+            started_at,
+            frames[index % len(frames)],
+            full_screen=CONVERSION_STATUS_FULLSCREEN,
+        )
         index += 1
         CONVERSION_STATUS_STOP.wait(0.5)
 
 
-def start_conversion_status(title: str) -> None:
-    global CONVERSION_STATUS_THREAD, CONVERSION_STATUS_TITLE
+def start_conversion_status(title: str, full_screen: bool = False) -> None:
+    global CONVERSION_STATUS_THREAD, CONVERSION_STATUS_TITLE, CONVERSION_STATUS_FULLSCREEN
     if DEBUG:
         return
     if CONVERSION_STATUS_THREAD is not None and CONVERSION_STATUS_THREAD.is_alive():
+        CONVERSION_STATUS_FULLSCREEN = CONVERSION_STATUS_FULLSCREEN or full_screen
         return
 
     CONVERSION_STATUS_TITLE = title or "Konwertowanie"
+    CONVERSION_STATUS_FULLSCREEN = full_screen
     CONVERSION_STATUS_STOP.clear()
     CONVERSION_STATUS_THREAD = threading.Thread(target=conversion_status_worker, daemon=True)
     CONVERSION_STATUS_THREAD.start()
 
 
 def stop_conversion_status() -> None:
-    global CONVERSION_STATUS_THREAD
+    global CONVERSION_STATUS_THREAD, CONVERSION_STATUS_FULLSCREEN
     if DEBUG:
         return
     CONVERSION_STATUS_STOP.set()
     if CONVERSION_STATUS_THREAD is not None:
         CONVERSION_STATUS_THREAD.join(timeout=1)
         CONVERSION_STATUS_THREAD = None
+    CONVERSION_STATUS_FULLSCREEN = False
 
 
 def progress_hook(progress: dict) -> None:
@@ -3225,7 +4055,7 @@ def progress_hook(progress: dict) -> None:
     if status == "downloading":
         print_progress_line(progress)
     elif status == "finished":
-        start_conversion_status(get_progress_title(progress))
+        start_conversion_status(get_progress_title_line(progress), is_collection_progress(progress))
 
 
 def postprocessor_hook(progress: dict) -> None:
@@ -3238,21 +4068,81 @@ def postprocessor_hook(progress: dict) -> None:
 
     status = progress.get("status")
     if status in {"started", "processing"}:
-        start_conversion_status(get_progress_title(progress))
+        start_conversion_status(get_progress_title_line(progress), is_collection_progress(progress))
     elif status == "finished":
         stop_conversion_status()
-        suffix = f" 100.0% {t('saved_status')}"
-        title = shorten_text(get_progress_title(progress), STATUS_TITLE_WIDTH)
-        print_status_line(f"{title:<{STATUS_TITLE_WIDTH}}{suffix}")
+        clear_status_line()
+        print_status_block(
+            [
+                shorten_text(get_progress_title_line(progress), STATUS_LINE_WIDTH),
+                f"{make_progress_bar(100, PROGRESS_BAR_WIDTH)} 100%",
+                t("saved_status"),
+                "ETA 00:00",
+            ],
+            full_screen=is_collection_progress(progress),
+        )
+
+
+def get_cookie_file_candidates() -> list[Path]:
+    candidates = [
+        PROGRAM_DIR / "cookies.txt",
+        CONFIG_DIR / "cookies.txt",
+        APP_CONFIG_DIR / "cookies.txt",
+        APP_DATA_DIR / "cookies.txt",
+    ]
+    if FACEBOOK_COOKIES_FILE.strip():
+        candidates.insert(0, Path(FACEBOOK_COOKIES_FILE.strip().strip('"')).expanduser())
+    return candidates
+
+
+def get_existing_cookie_file() -> Path | None:
+    for path in get_cookie_file_candidates():
+        try:
+            if path.exists() and path.is_file():
+                return path
+        except OSError:
+            continue
+    return None
+
+
+def get_cookie_retry_strategies() -> list[dict]:
+    strategies: list[dict] = []
+    browsers: list[str] = ["chrome"]
+    configured_browser = FACEBOOK_COOKIES_FROM_BROWSER.strip().lower()
+    if configured_browser and configured_browser not in browsers:
+        browsers.append(configured_browser)
+    for browser in COOKIE_BROWSER_FALLBACKS:
+        if browser not in browsers:
+            browsers.append(browser)
+
+    for browser in browsers:
+        strategies.append(
+            {
+                "name": f"ponowienie z yt-dlp --cookies-from-browser {browser}",
+                "options": {"cookiesfrombrowser": (browser, None, None, None)},
+            }
+        )
+
+    cookie_file = get_existing_cookie_file()
+    if cookie_file is not None:
+        strategies.append(
+            {
+                "name": f"ponowienie z plikiem cookies.txt: {cookie_file}",
+                "options": {"cookiefile": str(cookie_file)},
+            }
+        )
+
+    return strategies
 
 
 def get_workaround_strategies(media_type: str) -> list[dict]:
     fallback_format = "bestaudio/best" if media_type == "mp3" else "best/bv*+ba/b"
-    return [
+    strategies = [
         {
             "name": "standardowa konfiguracja",
             "options": {},
         },
+        *get_cookie_retry_strategies(),
         {
             "name": "ponowienie z dluzszym timeoutem i mniejsza liczba polaczen",
             "options": {
@@ -3281,6 +4171,7 @@ def get_workaround_strategies(media_type: str) -> list[dict]:
             },
         },
     ]
+    return strategies
 
 
 def format_size_from_bitrate(format_data: dict, duration: float | int | None) -> int | None:
@@ -3638,9 +4529,9 @@ def try_install_ffmpeg() -> bool:
     command = ["winget", "install", "-e", "--id", "Gyan.FFmpeg"]
     print("Instaluje FFmpeg...")
     if DEBUG:
-        result = subprocess.run(command, text=True)
+        result = subprocess.run(command, **SUBPROCESS_TEXT_OPTIONS)
     else:
-        result = subprocess.run(command, capture_output=True, text=True)
+        result = subprocess.run(command, capture_output=True, **SUBPROCESS_TEXT_OPTIONS)
 
     if result.returncode == 0:
         print("FFmpeg zainstalowany. Jesli program dalej go nie widzi, zamknij okno i uruchom ponownie.")
@@ -3665,10 +4556,6 @@ def has_spotdl() -> bool:
     return importlib.util.find_spec("spotdl") is not None
 
 
-def has_ofscraper() -> bool:
-    return importlib.util.find_spec("ofscraper") is not None or get_ofscraper_command() is not None
-
-
 def show_gallery_dl_help() -> None:
     print()
     print("Brakuje gallery-dl.")
@@ -3683,36 +4570,8 @@ def show_spotdl_help() -> None:
     print(t("spotify_missing"))
 
 
-def show_ofscraper_help() -> None:
-    print()
-    print(t("ofscraper_missing"))
-
-
 def can_write_mp3_metadata() -> bool:
     return mutagen is not None
-
-
-def get_ofscraper_command() -> list[str] | None:
-    if LOCAL_OFSCRAPER_PYTHON.exists():
-        return [str(LOCAL_OFSCRAPER_PYTHON), "-m", "ofscraper"]
-
-    local_candidates = [
-        LOCAL_PACKAGE_DIR / "Scripts" / "ofscraper.exe",
-        LOCAL_PACKAGE_DIR / "bin" / "ofscraper",
-        LOCAL_PACKAGE_DIR / "ofscraper.exe",
-    ]
-    for candidate in local_candidates:
-        if candidate.exists():
-            return [str(candidate)]
-
-    found = which("ofscraper")
-    if found:
-        return [found]
-
-    if importlib.util.find_spec("ofscraper") is not None:
-        return [sys.executable, "-m", "ofscraper"]
-
-    return None
 
 
 def download_photos(urls: Iterable[str], download_dir: Path) -> list[str]:
@@ -3753,9 +4612,9 @@ def download_photos(urls: Iterable[str], download_dir: Path) -> list[str]:
 
         command = [sys.executable, "-m", "gallery_dl", "--directory", str(photos_dir), url]
         if DEBUG:
-            cli_result = subprocess.run(command, text=True)
+            cli_result = subprocess.run(command, **SUBPROCESS_TEXT_OPTIONS)
         else:
-            cli_result = subprocess.run(command, capture_output=True, text=True)
+            cli_result = subprocess.run(command, capture_output=True, **SUBPROCESS_TEXT_OPTIONS)
 
         if cli_result.returncode == 0:
             print(t("status_success"))
@@ -3771,113 +4630,6 @@ def download_photos(urls: Iterable[str], download_dir: Path) -> list[str]:
         print_error_details(error)
         log_path = write_error_log(error, f"Pobieranie zdjec. URL: {url}.")
         print(t("details_saved", path=log_path))
-    return saved_items
-
-
-def download_onlyfans_direct_media(urls: Iterable[str], download_dir: Path) -> list[str]:
-    saved_items: list[str] = []
-    media_dir = download_dir / "OnlyFans"
-    media_dir.mkdir(parents=True, exist_ok=True)
-
-    for url in urls:
-        clear_console()
-        print(f"\n{t('download_label')} (OnlyFans): {url}")
-
-        if not is_onlyfans_url(url):
-            print(t("invalid_url", error="OnlyFans URL required."))
-            continue
-
-        if not is_direct_media_url(url):
-            print(t("onlyfans_not_direct"))
-            continue
-
-        filename = safe_download_filename(url, "onlyfans_media")
-        target = media_dir / filename
-        try:
-            headers = {"User-Agent": "Mozilla/5.0"}
-            cookie_header = load_cookie_header_from_file(ONLYFANS_COOKIES_FILE, url)
-            if cookie_header:
-                headers["Cookie"] = cookie_header
-            request = Request(url, headers=headers)
-            with urlopen(request, timeout=30) as response:
-                length = response.headers.get("Content-Length")
-                remote_checksums = extract_remote_checksums_from_headers(response.headers)
-                remote_metadata = register_remote_validation(
-                    url,
-                    filename=filename,
-                    size=int(length) if length and length.isdigit() else None,
-                    md5=remote_checksums.get("md5"),
-                    sha256=remote_checksums.get("sha256"),
-                )
-                with target.open("wb") as output:
-                    while True:
-                        chunk = response.read(1024 * 512)
-                        if not chunk:
-                            break
-                        output.write(chunk)
-            register_downloaded_file_validation(target, remote_metadata)
-            add_downloaded_files(1)
-            saved_items.append(filename)
-            print(t("status_success"))
-        except Exception as exc:
-            print(t("status_error"))
-            print_error_details(exc)
-            log_path = write_error_log(exc, f"OnlyFans direct media download. URL: {url}.")
-            print(t("details_saved", path=log_path))
-
-    return saved_items
-
-
-def run_ofscraper(download_dir: Path) -> list[str]:
-    saved_items: list[str] = []
-    of_dir = download_dir / "OnlyFans"
-    of_dir.mkdir(parents=True, exist_ok=True)
-
-    command = get_ofscraper_command()
-    if command is None:
-        show_ofscraper_help()
-        log_path = write_error_log("Missing OF-Scraper package", "OF-Scraper mode requested.")
-        print(t("details_saved", path=log_path))
-        return saved_items
-
-    env = os.environ.copy()
-    package_paths = [
-        LOCAL_PACKAGE_DIR,
-        LOCAL_PACKAGE_DIR / "Scripts",
-        LOCAL_PACKAGE_DIR / "bin",
-    ]
-    existing_paths = [str(path) for path in package_paths if path.exists()]
-    if existing_paths:
-        env["PYTHONPATH"] = str(LOCAL_PACKAGE_DIR) + os.pathsep + env.get("PYTHONPATH", "")
-        env["PATH"] = os.pathsep.join(existing_paths) + os.pathsep + env.get("PATH", "")
-    if LOCAL_FFMPEG_BIN.exists():
-        env["PATH"] = str(LOCAL_FFMPEG_BIN) + os.pathsep + env.get("PATH", "")
-
-    clear_console()
-    print(t("ofscraper_starting"))
-    print()
-
-    try:
-        if DEBUG:
-            result = subprocess.run(command, text=True, env=env, cwd=of_dir)
-        else:
-            result = subprocess.run(command, text=True, env=env, cwd=of_dir)
-
-        if result.returncode != 0:
-            raise RuntimeError(f"OF-Scraper exited with code {result.returncode}")
-
-        saved_items.append("OF-Scraper session")
-        print()
-        print(t("ofscraper_done"))
-    except Exception as exc:
-        print(t("status_error"))
-        print_error_details(exc)
-        log_path = write_error_log(
-            exc,
-            "OF-Scraper wrapper. The external tool requires a valid authorized account configuration and cannot bypass paywalls.",
-        )
-        print(t("details_saved", path=log_path))
-
     return saved_items
 
 
@@ -3920,9 +4672,9 @@ def download_spotify_with_spotdl(urls: Iterable[str], download_dir: Path) -> lis
 
         try:
             if DEBUG:
-                result = subprocess.run(command, text=True, env=env)
+                result = subprocess.run(command, env=env, **SUBPROCESS_TEXT_OPTIONS)
             else:
-                result = subprocess.run(command, capture_output=True, text=True, env=env)
+                result = subprocess.run(command, capture_output=True, env=env, **SUBPROCESS_TEXT_OPTIONS)
 
             if result.returncode != 0:
                 output = ""
@@ -3978,7 +4730,7 @@ def download(
             if attempt > 1:
                 print()
                 print(
-                    f"Proba obejscia problemu {attempt}/3: {strategy['name']}..."
+                    f"Proba obejscia problemu {attempt}/{len(strategies)}: {strategy['name']}..."
                 )
 
             try:
@@ -4033,16 +4785,16 @@ def download(
                     clear_status_line()
                 last_error = exc
                 if attempt < len(strategies):
-                    print(f"\nNie udalo sie: {exc}")
+                    print(f"\nNie udalo sie: {format_user_error(exc)}")
                     print_error_details(exc)
                     print("Aplikacja sprobuje kolejnego sposobu automatycznie.")
                 else:
-                    print(f"\nNie udalo sie po 3 probach: {exc}")
+                    print(f"\nNie udalo sie po {len(strategies)} probach: {format_user_error(exc)}")
                     print_error_details(exc)
 
         if last_error is not None:
             context = (
-                f"Nieudane pobieranie po 3 probach. URL: {url}. "
+                f"Nieudane pobieranie po {len(strategies)} probach. URL: {url}. "
                 f"Typ: {media_type}. Zrodlo: {source_type}."
             )
             log_path = write_error_log(last_error, context)
@@ -4068,7 +4820,7 @@ def run_download_flow() -> None:
     elif media_choice == "4":
         media_type = "spotify"
     else:
-        media_type = "onlyfans"
+        return
 
     if media_type == "photos":
         source_choice = ask_choice(
@@ -4142,44 +4894,6 @@ def run_download_flow() -> None:
                 print_saved_summary(download_dir / "Spotify", saved_items)
         return
 
-    if media_type == "onlyfans":
-        source_choice = ask_choice(
-            t("onlyfans_source"),
-            {
-                "0": t("back_to_menu").strip(),
-                "1": t("single_onlyfans_link"),
-                "2": t("txt_file"),
-                "3": t("ofscraper_mode"),
-            },
-        )
-        if source_choice == "0":
-            return
-        download_dir = ask_download_dir()
-
-        if source_choice == "1":
-            while True:
-                url = ask_url_or_quit(t("onlyfans_link_prompt"))
-                if url is None:
-                    print(t("back_to_menu"))
-                    return
-                saved_items = download_onlyfans_direct_media([url], download_dir)
-                if saved_items:
-                    add_history_entries([url], "onlyfans", saved_items)
-                    print_saved_summary(download_dir / "OnlyFans", saved_items)
-        elif source_choice == "2":
-            txt_path = ask_non_empty(t("txt_path_prompt"))
-            urls = read_urls_from_txt(txt_path)
-            saved_items = download_onlyfans_direct_media(urls, download_dir)
-            if saved_items:
-                add_history_entries(urls, "onlyfans", saved_items)
-                print_saved_summary(download_dir / "OnlyFans", saved_items)
-        else:
-            saved_items = run_ofscraper(download_dir)
-            if saved_items:
-                add_history_entries([], "onlyfans-ofscraper", saved_items)
-                print_saved_summary(download_dir / "OnlyFans", saved_items)
-        return
-
     download_dir = ask_download_dir()
     while True:
         detected = ask_auto_download_urls(media_type)
@@ -4197,13 +4911,16 @@ def main() -> None:
     init_database()
     ensure_download_stats_file()
     ensure_snake_scoreboard_file()
+    clear_clipboard_queue()
     print_app_header()
     if not ensure_internet_or_offline_mode():
         print(t("program_no_internet"))
         return
+    start_background_clipboard_watcher()
 
     try:
         while True:
+            save_usage_time()
             clear_console()
             print_app_header()
             print()
@@ -4211,23 +4928,48 @@ def main() -> None:
             pending_queue_count = get_pending_large_file_queue_count()
             if pending_queue_count:
                 print(t("queue_pending", count=pending_queue_count))
+            clipboard_queue_count = len(read_clipboard_queue())
+            if clipboard_queue_count:
+                print(t("clipboard_queue_menu", count=clipboard_queue_count))
+            if CLIPBOARD_STATUS_LAST_URL:
+                print(
+                    t(
+                        "clipboard_last_status",
+                        url=shorten_text(CLIPBOARD_STATUS_LAST_URL, 54),
+                        count=CLIPBOARD_STATUS_QUEUE_COUNT or clipboard_queue_count,
+                    )
+                )
             action = ask_choice(
                 t("main_action"),
                 {
                     "1": t("main_download"),
                     "2": t("main_file_download"),
-                    "3": t("main_settings"),
-                    "4": t("main_exit"),
+                    "3": t("main_clipboard"),
+                    "4": t("main_stats"),
+                    "5": t("main_settings"),
+                    "6": t("main_exit"),
                 },
             )
 
-            if action == "4":
+            if action == "6":
                 print(t("goodbye"))
                 break
             if action == "2":
                 run_large_file_flow()
                 continue
             if action == "3":
+                prompt_clipboard_queue(DEFAULT_DOWNLOAD_DIR)
+                input(t("continue_prompt"))
+                continue
+            if action == "4":
+                clear_console()
+                print_app_header()
+                show_download_stats()
+                input(t("continue_prompt"))
+                continue
+            if action == "5":
+                clear_console()
+                print_app_header()
                 show_settings_menu()
                 continue
 
@@ -4240,9 +4982,13 @@ def main() -> None:
         log_path = write_error_log(exc, "Nieoczekiwany blad programu")
         print(t("details_saved", path=log_path))
     finally:
+        stop_background_clipboard_watcher()
+        save_usage_time()
         if not SKIP_EXIT_PAUSE:
             pause_before_exit()
 
 
 if __name__ == "__main__":
+    if "--import-cookies" in sys.argv:
+        raise SystemExit(run_cookie_import_cli())
     main()
