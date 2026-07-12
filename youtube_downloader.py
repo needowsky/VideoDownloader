@@ -86,6 +86,11 @@ except ImportError:
     browser_cookie3 = None
 
 try:
+    import browsercookie
+except ImportError:
+    browsercookie = None
+
+try:
     from bs4 import BeautifulSoup
 except ImportError:
     BeautifulSoup = None
@@ -188,6 +193,8 @@ STATUS_LINE_WIDTH = 72
 STATUS_TITLE_WIDTH = 22
 STATUS_CLEAR_SEQUENCE = "\033[2K\r"
 STATUS_BLOCK_LINES = 0
+DOWNLOAD_BATCH_CURRENT = 0
+DOWNLOAD_BATCH_TOTAL = 0
 LOG_DIR = APP_DATA_DIR / "logs"
 ERROR_LOG_FILE = LOG_DIR / "log_error_data.txt"
 COMMON_ERROR_HINTS = [
@@ -203,6 +210,7 @@ COMMON_ERROR_HINTS = [
 
 TEXTS: dict[str, dict[str, str]] = {}
 LANGUAGE_WARNING_KEYS: set[str] = set()
+LANGUAGE_PROBLEM_ACTIVE = False
 FALLBACK_TEXTS = {
     "en": {
         "choose_option": "Choose option: ",
@@ -221,17 +229,99 @@ FALLBACK_TEXTS = {
         "duplicate_delete": "Delete the new numbered file",
         "duplicate_kept": "Duplicate file kept.",
         "duplicate_deleted": "Deleted duplicate files: {count}",
+        "overall_progress": "Overall",
+        "summary_files": "Downloaded files: {count}",
+        "summary_total_size": "Total size: {size}",
+        "summary_source": "Source: {source}",
+        "summary_date": "Date: {date}",
+        "summary_failures": "Failed items: {count}",
+        "summary_validation_problems": "Validation warnings: {count}",
+        "retry_status": "[error - retrying alternative option {current}/{total}]",
+        "help_stats_ranks": "stats ranks / stats rangi - shows download rank thresholds",
+        "rank_thresholds_title": "Rank thresholds",
+        "rank_thresholds_overall": "Overall rank - all downloads",
+        "rank_thresholds_category": "Category ranks - Spotify, YouTube, Naughties, Other",
+        "rank_threshold_line": "{range}: {rank}",
+        "rank_overall_starter": "Fresh start",
+        "rank_overall_newcomer": "Newcomer",
+        "rank_overall_downloader": "Downloader",
+        "rank_overall_pirate": "Pirate",
+        "rank_overall_collector": "Collector",
+        "rank_overall_collection_builder": "Collection builder",
+        "rank_overall_archivist": "Archive keeper",
+        "rank_overall_captain": "Download captain",
+        "rank_overall_master": "Download master",
+        "rank_overall_legend": "Library legend",
+        "rank_category_rookie": "Rookie",
+        "rank_category_regular": "Regular",
+        "rank_category_fan": "Fan",
+        "rank_category_collector": "Collector",
+        "rank_category_specialist": "Specialist",
+        "rank_category_legend": "Legend",
+        "language_pack_problem": "Language pack needs update: {reason}",
+        "language_pack_update_hint": "Language pack is missing new texts. Type update lang to download the newest language pack, or update force to reinstall the current app version.",
+        "language_pack_update_short": "Type update lang to refresh translations.",
+        "update_lang_checking": "Downloading newest language packs...",
+        "update_lang_done": "Language packs updated. Restart is not required.",
+        "update_lang_missing_assets": "No language pack assets were found in the selected GitHub release.",
+        "update_force_note": "Forced update enabled. The updater will reinstall files even if the version is already current.",
+        "help_update_lang": "update lang - downloads newest language packs only",
+        "help_update_force": "update force - reinstalls latest app files even if versions match",
+    },
+    "pl": {
+        "language_pack_problem": "Paczka jezykowa wymaga aktualizacji: {reason}",
+        "language_pack_update_hint": "Paczka jezykowa nie ma nowych tekstow. Wpisz update lang, aby pobrac najnowsze tlumaczenia, albo update force, aby przeinstalowac obecna wersje aplikacji.",
+        "language_pack_update_short": "Wpisz update lang, aby odswiezyc tlumaczenia.",
+        "update_lang_checking": "Pobieram najnowsze paczki jezykowe...",
+        "update_lang_done": "Paczki jezykowe zaktualizowane. Restart nie jest wymagany.",
+        "update_lang_missing_assets": "Nie znaleziono paczek jezykowych w wybranym release GitHub.",
+        "update_force_note": "Wymuszona aktualizacja wlaczona. Aktualizator przeinstaluje pliki nawet przy zgodnej wersji.",
+        "help_update_lang": "update lang - pobiera tylko najnowsze paczki jezykowe",
+        "help_update_force": "update force - przeinstalowuje najnowsze pliki aplikacji nawet przy zgodnej wersji",
+        "rank_overall_starter": "Start",
+        "rank_overall_newcomer": "Nowicjusz",
+        "rank_overall_downloader": "Pobieracz",
+        "rank_overall_pirate": "Pirat",
+        "rank_overall_collector": "Kolekcjoner",
+        "rank_overall_collection_builder": "Budowniczy kolekcji",
+        "rank_overall_archivist": "Archiwista",
+        "rank_overall_captain": "Kapitan pobierania",
+        "rank_overall_master": "Mistrz pobierania",
+        "rank_overall_legend": "Legenda biblioteki",
+        "rank_category_rookie": "Swiezak",
+        "rank_category_regular": "Staly bywalec",
+        "rank_category_fan": "Fan",
+        "rank_category_collector": "Kolekcjoner",
+        "rank_category_specialist": "Specjalista",
+        "rank_category_legend": "Legenda",
     }
 }
 
 
-def get_language_pack_help(reason: str) -> str:
+def builtin_text(key: str, language: str | None = None) -> str:
+    selected_language = (language or LANG).lower()
     return (
-        f"Missing or broken language pack: {reason}. "
-        f"Download the newest language files from GitHub: "
-        f"https://github.com/{GITHUB_REPO}/releases/latest "
-        "or run update / reinstall the application."
+        FALLBACK_TEXTS.get(selected_language, {}).get(key)
+        or FALLBACK_TEXTS.get("en", {}).get(key)
+        or key
     )
+
+
+def get_language_pack_help(reason: str) -> str:
+    template = (
+        TEXTS.get(LANG.lower(), {}).get("language_pack_problem")
+        or TEXTS.get("en", {}).get("language_pack_problem")
+        or builtin_text("language_pack_problem")
+    )
+    hint = (
+        TEXTS.get(LANG.lower(), {}).get("language_pack_update_short")
+        or TEXTS.get("en", {}).get("language_pack_update_short")
+        or builtin_text("language_pack_update_short")
+    )
+    try:
+        return f"{template.format(reason=reason)} {hint}"
+    except Exception:
+        return f"{builtin_text('language_pack_problem').format(reason=reason)} {builtin_text('language_pack_update_short')}"
 
 
 def get_error_log_file() -> Path:
@@ -268,10 +358,12 @@ def write_language_error_log(message: str) -> None:
 
 
 def report_language_problem(identifier: str, message: str) -> None:
+    global LANGUAGE_PROBLEM_ACTIVE
+    LANGUAGE_PROBLEM_ACTIVE = True
     if identifier in LANGUAGE_WARNING_KEYS:
         return
     LANGUAGE_WARNING_KEYS.add(identifier)
-    print(get_language_pack_help(message))
+    print_colored_notice(get_language_pack_help(message), "yellow")
     write_language_error_log(message)
 
 
@@ -304,7 +396,7 @@ def load_language_files() -> None:
     TEXTS.clear()
     errors: list[str] = []
     found_language_files = 0
-    for directory in (LANG_DIR, APP_LANG_DIR):
+    for directory in (PROGRAM_DIR, LANG_DIR, APP_LANG_DIR):
         if not directory.exists():
             continue
         for path in sorted(directory.glob("*.lang")):
@@ -381,11 +473,13 @@ def t(key: str, **kwargs: object) -> str:
     if value is None:
         value = fallback_language.get(key)
     if value is None:
+        value = FALLBACK_TEXTS.get(lang, {}).get(key) or FALLBACK_TEXTS.get("en", {}).get(key)
+    if value is None:
         report_language_problem(
             f"missing-translation:{lang}:{key}",
             f"Missing translation key '{key}' in language '{lang}'.",
         )
-        value = get_language_pack_help(f"missing translation key '{key}'")
+        value = key
     try:
         return value.format(**kwargs)
     except Exception as exc:
@@ -545,6 +639,7 @@ SUPPORTED_SITE_HINTS = {
 SUPPORTED_SITE_HINTS.update({domain: label for domain, (_site_key, label) in NAUGHTY_SITE_HINTS.items()})
 MATRIX_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ#$%&*+-/<=>?"
 MAX_REASONABLE_DOWNLOAD_COUNT = 10_000_000
+STATS_SCHEMA_VERSION = 2
 SNAKE_WIDTH = 30
 SNAKE_HEIGHT = 14
 GOTHIC_URL = "https://www.youtube.com/watch?v=DLyqSQhS6E0"
@@ -554,12 +649,35 @@ CONVERSION_STATUS_STOP = threading.Event()
 CONVERSION_STATUS_THREAD: threading.Thread | None = None
 CONVERSION_STATUS_TITLE = "Konwertowanie"
 CONVERSION_STATUS_FULLSCREEN = False
+CONVERSION_STATUS_OVERALL_PERCENT: float | None = None
 DOWNLOAD_CANCEL_REQUESTED = False
 COMPLETED_DOWNLOAD_KEYS: set[str] = set()
 COMPLETED_DOWNLOAD_TITLES: list[str] = []
 COMPLETED_DOWNLOAD_FILES: list[str] = []
+DOWNLOAD_SUMMARY_FILES: list[str] = []
+DOWNLOAD_FAILURES: list[dict[str, str]] = []
 DUPLICATE_FILE_EVENTS: list[dict[str, str]] = []
 DOWNLOAD_STAT_KEYS = ("total", "spotify", "youtube", "naughties", *NAUGHTY_STAT_KEYS, "other")
+OVERALL_RANK_SCALE = (
+    (10, "rank_overall_starter"),
+    (25, "rank_overall_newcomer"),
+    (50, "rank_overall_downloader"),
+    (100, "rank_overall_pirate"),
+    (200, "rank_overall_collector"),
+    (500, "rank_overall_collection_builder"),
+    (1000, "rank_overall_archivist"),
+    (2000, "rank_overall_captain"),
+    (5000, "rank_overall_master"),
+    (9001, "rank_overall_legend"),
+)
+CATEGORY_RANK_SCALE = (
+    (10, "rank_category_rookie"),
+    (50, "rank_category_regular"),
+    (150, "rank_category_fan"),
+    (500, "rank_category_collector"),
+    (1500, "rank_category_specialist"),
+    (9001, "rank_category_legend"),
+)
 TOTAL_USAGE_SECONDS = 0
 SESSION_STARTED_AT = time.time()
 CLIPBOARD_WATCHER_STOP = threading.Event()
@@ -673,11 +791,24 @@ def handle_easter_egg(value: str) -> bool:
         show_download_stats(show_naughties=True)
         input(t("continue_prompt"))
         return True
+    if command in {"stats rangi", "stats ranks"}:
+        clear_console()
+        print_app_header()
+        show_rank_thresholds()
+        input(t("continue_prompt"))
+        return True
     if command == "sites":
         show_supported_sites()
         return True
     if command == "update":
         check_for_update()
+        return True
+    if command == "update force":
+        check_for_update(force=True)
+        return True
+    if command == "update lang":
+        update_language_packs()
+        input(t("continue_prompt"))
         return True
     if command == "history":
         show_history()
@@ -749,8 +880,11 @@ def show_command_help() -> None:
     print(t("help_lang"))
     print(t("help_stats"))
     print(t("help_stats_naughties"))
+    print(t("help_stats_ranks"))
     print(t("help_sites"))
     print(t("help_update"))
+    print(t("help_update_lang"))
+    print(t("help_update_force"))
     print(t("help_history"))
     print(t("help_settings"))
     print(t("help_about"))
@@ -826,6 +960,20 @@ def ping_youtube() -> None:
         print(t("ping_result", ms=elapsed_ms))
     except Exception as exc:
         print(t("ping_error", error=exc))
+
+
+def print_colored_notice(message: str, color: str = "yellow") -> None:
+    console = get_rich_console()
+    if console is not None:
+        console.print(f"[bold {color}]{message}[/bold {color}]")
+        return
+    print(message)
+
+
+def print_language_update_hint_if_needed() -> None:
+    if not LANGUAGE_PROBLEM_ACTIVE:
+        return
+    print_colored_notice(t("language_pack_update_hint"), "yellow")
 
 
 def show_supported_sites() -> None:
@@ -1206,40 +1354,145 @@ def parse_version(value: str) -> tuple[int, ...]:
     return tuple(int(part) for part in numbers) if numbers else (0,)
 
 
+def is_exe_release_label(value: str) -> bool:
+    return bool(re.match(r"^\s*EXE[\s_-]+v?\d", value or "", re.IGNORECASE))
+
+
 def get_release_version_label(release: dict[str, object]) -> str:
     name = str(release.get("name") or "").strip()
     tag = str(release.get("tag_name") or "").strip()
-    if re.search(r"\d", name):
-        return name
-    return tag or name
+    if re.search(r"\d", tag):
+        return tag
+    return name or tag
+
+
+def is_app_release(release: dict[str, object]) -> bool:
+    labels = [
+        str(release.get("tag_name") or "").strip(),
+        str(release.get("name") or "").strip(),
+    ]
+    return not any(is_exe_release_label(label) for label in labels if label)
 
 
 def get_update_release() -> dict[str, object]:
-    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=50"
     request = Request(api_url, headers={"User-Agent": "VideoDownloader"})
     with urlopen(request, timeout=20) as response:
-        release = json.loads(response.read().decode("utf-8"))
-    if not isinstance(release, dict):
-        raise RuntimeError("GitHub latest release response is invalid.")
-    return release
+        releases = json.loads(response.read().decode("utf-8"))
+    if not isinstance(releases, list):
+        raise RuntimeError("GitHub releases response is invalid.")
+
+    candidates: list[tuple[tuple[int, ...], dict[str, object]]] = []
+    for release in releases:
+        if not isinstance(release, dict):
+            continue
+        if release.get("draft") or release.get("prerelease"):
+            continue
+        if not is_app_release(release):
+            continue
+        label = get_release_version_label(release)
+        if not re.search(r"\d", label):
+            continue
+        candidates.append((parse_version(label), release))
+
+    if not candidates:
+        raise RuntimeError("No versioned application release found on GitHub.")
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
 
 
-def start_external_updater() -> None:
+def start_external_updater(*args: str) -> None:
     updater = PROGRAM_DIR / "update.bat"
     if not updater.exists():
         raise FileNotFoundError(f"Missing updater file: {updater}")
 
+    clean_args = [arg for arg in args if arg]
     if os.name == "nt":
         subprocess.Popen(
-            ["cmd.exe", "/c", "start", "Video Downloader Updater", str(updater)],
+            ["cmd.exe", "/c", "start", "Video Downloader Updater", str(updater), *clean_args],
             cwd=PROGRAM_DIR,
             shell=False,
         )
     else:
-        subprocess.Popen([str(updater)], cwd=PROGRAM_DIR)
+        subprocess.Popen([str(updater), *clean_args], cwd=PROGRAM_DIR)
 
 
-def check_for_update() -> None:
+def download_release_language_assets(release: dict[str, object]) -> int:
+    APP_LANG_DIR.mkdir(parents=True, exist_ok=True)
+    assets = release.get("assets") or []
+    if not isinstance(assets, list):
+        return 0
+    downloaded = 0
+    for language_file in ("en.lang", "pl.lang"):
+        asset = next(
+            (
+                item
+                for item in assets
+                if isinstance(item, dict)
+                and str(item.get("name") or "").lower() == language_file
+                and item.get("browser_download_url")
+            ),
+            None,
+        )
+        if not asset:
+            continue
+        request = Request(str(asset["browser_download_url"]), headers={"User-Agent": "VideoDownloader"})
+        with urlopen(request, timeout=30) as response:
+            payload = response.read()
+        data = validate_language_data(json.loads(payload.decode("utf-8")), language_file)
+        (APP_LANG_DIR / language_file).write_text(
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        downloaded += 1
+    return downloaded
+
+
+def download_raw_language_files() -> int:
+    APP_LANG_DIR.mkdir(parents=True, exist_ok=True)
+    downloaded = 0
+    for language_file in ("en.lang", "pl.lang"):
+        url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/config/lang/{language_file}"
+        request = Request(url, headers={"User-Agent": "VideoDownloader"})
+        try:
+            with urlopen(request, timeout=30) as response:
+                payload = response.read()
+            data = validate_language_data(json.loads(payload.decode("utf-8")), language_file)
+        except Exception:
+            continue
+        (APP_LANG_DIR / language_file).write_text(
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        downloaded += 1
+    return downloaded
+
+
+def update_language_packs() -> None:
+    global LANGUAGE_PROBLEM_ACTIVE
+    print()
+    print(t("update_lang_checking"))
+    try:
+        release = get_update_release()
+        count = download_release_language_assets(release)
+        if count == 0:
+            count = download_raw_language_files()
+        if count == 0:
+            print(t("update_lang_missing_assets"))
+            return
+        TEXTS.clear()
+        LANGUAGE_WARNING_KEYS.clear()
+        LANGUAGE_PROBLEM_ACTIVE = False
+        load_language_files()
+        print(t("update_lang_done"))
+    except Exception as exc:
+        print(t("update_error", error=exc))
+        log_path = write_error_log(exc, "GitHub language pack update")
+        print(t("details_saved", path=log_path))
+
+
+def check_for_update(force: bool = False) -> None:
     global SKIP_EXIT_PAUSE
     print()
     print(t("update_checking"))
@@ -1248,7 +1501,9 @@ def check_for_update() -> None:
         latest = get_release_version_label(release)
         print(t("update_current", current=APP_VERSION))
         print(t("update_latest", latest=latest or "?"))
-        if not latest or parse_version(latest) <= parse_version(APP_VERSION):
+        if force:
+            print(t("update_force_note"))
+        if not force and (not latest or parse_version(latest) <= parse_version(APP_VERSION)):
             print(t("update_none"))
             return
 
@@ -1262,7 +1517,7 @@ def check_for_update() -> None:
         if not ask_yes_no(t("update_prompt")):
             return
 
-        start_external_updater()
+        start_external_updater("force" if force else "")
         print(t("update_external_started"))
         SKIP_EXIT_PAUSE = True
         raise SystemExit(0)
@@ -1607,7 +1862,7 @@ def get_validation_targets(saved_path: Path, saved_items: Iterable[str]) -> list
     if saved_path.is_file():
         return [saved_path]
 
-    for file_path in COMPLETED_DOWNLOAD_FILES:
+    for file_path in [*DOWNLOAD_SUMMARY_FILES, *COMPLETED_DOWNLOAD_FILES]:
         path = Path(file_path)
         if path.exists() and path.is_file() and path.suffix != ".part":
             resolved = path.resolve()
@@ -1719,50 +1974,46 @@ def print_file_validation(saved_path: Path, saved_items: Iterable[str]) -> None:
         print(t("validation_unavailable"))
         return
 
-    print(t("validation_title"))
-    preview_limit = 10
-    for row in rows[:preview_limit]:
-        print(f"- {row['name']}")
-        print(f"  {t('validation_size')}: {row['size_mb']} ({row['size_bytes']} B)")
-        print(f"  Source check: {row.get('remote_status', 'local-only')}")
-        if row.get("remote_size_bytes"):
-            print(f"  Expected size: {row['remote_size_mb']} ({row['remote_size_bytes']} B)")
-        if row.get("md5") and row.get("sha256"):
-            print(f"  MD5: {row['md5']}")
-            print(f"  SHA256: {row['sha256']}")
-        else:
-            print(f"  {t('validation_hash_unavailable')}")
-        if row.get("remote_md5"):
-            print(f"  Expected MD5: {row['remote_md5']}")
-        if row.get("remote_sha256"):
-            print(f"  Expected SHA256: {row['remote_sha256']}")
-        for problem in row.get("remote_problems", []):
-            print(f"  Validation problem: {problem}")
-    if len(rows) > preview_limit:
-        print(t("saved_more", count=len(rows) - preview_limit))
+    total_size = sum(int(row.get("size_bytes", 0) or 0) for row in rows)
+    validation_problems = sum(
+        1
+        for row in rows
+        if row.get("remote_status") == "mismatch" or bool(row.get("remote_problems"))
+    )
+
+    print(t("summary_files", count=len(rows)))
+    print(t("summary_total_size", size=format_mb(total_size)))
+    print(t("summary_validation_problems", count=validation_problems))
 
     report_path = write_validation_report(rows)
     if report_path:
         print(t("validation_report", path=report_path))
 
 
-def print_saved_summary(saved_path: Path, saved_items: Iterable[str] | None = None) -> None:
+def print_saved_summary(
+    saved_path: Path,
+    saved_items: Iterable[str] | None = None,
+    source: str = "",
+    failures: Iterable[dict[str, str]] | None = None,
+) -> None:
     clear_console()
     items = [item for item in (saved_items or []) if item]
+    failed_items = list(failures or [])
     print(t("finished_title"))
     print()
-    if items:
-        print(t("saved_items"))
-        preview_limit = 10
-        for item in items[:preview_limit]:
-            print(f"- {item}")
-        if len(items) > preview_limit:
-            print(t("saved_more", count=len(items) - preview_limit))
-    else:
-        print(t("saved_files"))
+    print(t("summary_date", date=datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    print(t("summary_source", source=source or t("saved_files")))
+    print(t("summary_files", count=len(items)))
+    print(t("summary_failures", count=len(failed_items)))
+    if failed_items:
+        for failure in failed_items[:5]:
+            print(f"- {failure.get('url', '')}: {failure.get('error', '')}")
+        if len(failed_items) > 5:
+            print(t("saved_more", count=len(failed_items) - 5))
 
-    print()
-    print_file_validation(saved_path, items)
+    if items:
+        print()
+        print_file_validation(saved_path, items)
     print()
     print(f"{t('location')}: {make_folder_hyperlink(saved_path)}")
     if not terminal_supports_hyperlinks():
@@ -1770,6 +2021,7 @@ def print_saved_summary(saved_path: Path, saved_items: Iterable[str] | None = No
     ask_duplicate_cleanup()
     print()
     COMPLETED_DOWNLOAD_FILES.clear()
+    DOWNLOAD_SUMMARY_FILES.clear()
 
 
 def has_internet_connection(timeout: float = 3.0) -> bool:
@@ -2095,6 +2347,7 @@ def get_existing_snake_stats_file() -> Path:
 
 def get_default_stats_config_data() -> dict[str, object]:
     return {
+        "stats_schema_version": STATS_SCHEMA_VERSION,
         "download_count": encode_download_count(0),
         "download_breakdown": encode_download_breakdown(default_download_breakdown(0)),
     }
@@ -2117,6 +2370,7 @@ def read_stats_config() -> dict[str, object]:
 
 def write_stats_config(data: dict[str, object]) -> None:
     safe_data = {
+        "stats_schema_version": STATS_SCHEMA_VERSION,
         "download_count": encode_download_count(decode_download_count(str(data.get("download_count", ""))) or 0),
         "download_breakdown": encode_download_breakdown(
             decode_download_breakdown(str(data.get("download_breakdown", ""))) or default_download_breakdown(0)
@@ -2275,33 +2529,11 @@ def get_rank_from_scale(count: int, scale: tuple[tuple[int, str], ...], default_
 
 
 def get_overall_download_rank(count: int) -> str:
-    return get_rank_from_scale(
-        count,
-        (
-            (25, "rank_overall_starter"),
-            (100, "rank_overall_downloader"),
-            (300, "rank_overall_collector"),
-            (1000, "rank_overall_archivist"),
-            (3000, "rank_overall_master"),
-            (9001, "rank_overall_legend"),
-        ),
-        "rank_overall_legend",
-    )
+    return get_rank_from_scale(count, OVERALL_RANK_SCALE, "rank_overall_legend")
 
 
 def get_category_download_rank(count: int) -> str:
-    return get_rank_from_scale(
-        count,
-        (
-            (10, "rank_category_rookie"),
-            (50, "rank_category_regular"),
-            (150, "rank_category_fan"),
-            (500, "rank_category_collector"),
-            (1500, "rank_category_specialist"),
-            (9001, "rank_category_legend"),
-        ),
-        "rank_category_legend",
-    )
+    return get_rank_from_scale(count, CATEGORY_RANK_SCALE, "rank_category_legend")
 
 
 def get_download_counter_text() -> str:
@@ -2361,6 +2593,40 @@ def show_download_stats(show_naughties: bool = False) -> None:
         print(format_stats_line("stats_other", breakdown["other"]))
         print(t("stats_usage_time", time=format_duration(get_total_usage_seconds())))
         print(t("stats_naughties_hint"))
+    print()
+
+
+def format_rank_threshold_line(start: int, end: int | None, rank_key: str) -> str:
+    if end is None:
+        range_text = f"{start}+"
+        rank_name = "OVER 9000!" if start > 9000 else t(rank_key)
+    elif start == end:
+        range_text = str(start)
+        rank_name = t(rank_key)
+    else:
+        range_text = f"{start}-{end}"
+        rank_name = t(rank_key)
+    return t("rank_threshold_line", range=range_text, rank=rank_name)
+
+
+def print_rank_scale(scale: tuple[tuple[int, str], ...]) -> None:
+    start = 0
+    for threshold, rank_key in scale:
+        end = threshold - 1
+        print(format_rank_threshold_line(start, end, rank_key))
+        start = threshold
+    print(format_rank_threshold_line(9001, None, scale[-1][1]))
+
+
+def show_rank_thresholds() -> None:
+    print()
+    print(t("rank_thresholds_title"))
+    print()
+    print(t("rank_thresholds_overall"))
+    print_rank_scale(OVERALL_RANK_SCALE)
+    print()
+    print(t("rank_thresholds_category"))
+    print_rank_scale(CATEGORY_RANK_SCALE)
     print()
 
 
@@ -3157,6 +3423,81 @@ def download_cloud_file_with_ytdlp(url: str, download_dir: Path) -> tuple[str, P
         return None
 
 
+def files_created_after(download_dir: Path, before_files: set[str]) -> list[Path]:
+    return [
+        path
+        for path in download_dir.iterdir()
+        if path.is_file() and path.name not in before_files and not path.name.endswith(".part")
+    ]
+
+
+def download_google_drive_file(url: str, download_dir: Path) -> tuple[str, Path] | None:
+    if not ensure_python_import("gdown", "gdown"):
+        return download_cloud_file_with_ytdlp(url, download_dir)
+
+    download_dir.mkdir(parents=True, exist_ok=True)
+    print()
+    print(t("cloud_downloading_gdrive"))
+    before_files = {path.name for path in download_dir.iterdir() if path.is_file()}
+    previous_cwd = Path.cwd()
+    try:
+        os.chdir(download_dir)
+        parsed = urlparse(url)
+        if "/folders/" in parsed.path:
+            result = gdown.download_folder(url=url, output=str(download_dir), quiet=not DEBUG, use_cookies=True)
+        else:
+            result = gdown.download(url=url, output=None, quiet=not DEBUG, use_cookies=True, resume=True)
+    except TypeError:
+        result = None
+        try:
+            result = gdown.download(url=url, output=None, quiet=not DEBUG)
+        except Exception:
+            raise
+    except Exception as exc:
+        print_error_details(exc)
+        log_path = write_error_log(exc, f"Google Drive download through gdown. URL: {url}")
+        print(t("details_saved", path=log_path))
+        return download_cloud_file_with_ytdlp(url, download_dir)
+    finally:
+        try:
+            os.chdir(previous_cwd)
+        except OSError:
+            pass
+
+    completed = files_created_after(download_dir, before_files)
+    if completed:
+        return completed[0].name, download_dir
+    if isinstance(result, str) and result:
+        return Path(result).name, download_dir
+    if isinstance(result, list) and result:
+        return Path(str(result[0])).name, download_dir
+    return "Google Drive", download_dir
+
+
+def download_mega_file(url: str, download_dir: Path) -> tuple[str, Path] | None:
+    if not ensure_python_import("mega-lite", "mega_downloader"):
+        return download_cloud_file_with_ytdlp(url, download_dir)
+
+    download_dir.mkdir(parents=True, exist_ok=True)
+    print()
+    print(t("cloud_downloading_mega"))
+    before_files = {path.name for path in download_dir.iterdir() if path.is_file()}
+    try:
+        result = mega_downloader.download_mega_file(url, str(download_dir))
+    except Exception as exc:
+        print_error_details(exc)
+        log_path = write_error_log(exc, f"MEGA download through mega-lite. URL: {url}")
+        print(t("details_saved", path=log_path))
+        return download_cloud_file_with_ytdlp(url, download_dir)
+
+    completed = files_created_after(download_dir, before_files)
+    if completed:
+        return completed[0].name, download_dir
+    if result:
+        return Path(str(result)).name, download_dir
+    return "MEGA", download_dir
+
+
 def download_large_files(urls: Iterable[str], download_dir: Path, persist_queue: bool = True) -> list[str]:
     saved_items: list[str] = []
     pending_urls = list(urls)
@@ -3169,7 +3510,11 @@ def download_large_files(urls: Iterable[str], download_dir: Path, persist_queue:
         url = pending_urls.pop(0)
         if persist_queue:
             write_large_file_queue(download_dir, url, pending_urls)
-        if is_cloud_file_url(url):
+        if is_google_drive_url(url):
+            result = download_google_drive_file(url, download_dir)
+        elif is_mega_url(url):
+            result = download_mega_file(url, download_dir)
+        elif is_cloud_file_url(url):
             result = download_cloud_file_with_ytdlp(url, download_dir)
         else:
             result = download_large_file(url, download_dir, pending_urls, persist_queue)
@@ -3298,7 +3643,9 @@ def get_clipboard_media_type(url: str) -> str:
 
 
 def clear_clipboard_queue() -> None:
+    global CLIPBOARD_STATUS_QUEUE_COUNT
     db_delete_key("clipboard_queue")
+    CLIPBOARD_STATUS_QUEUE_COUNT = 0
     try:
         CLIPBOARD_QUEUE_FILE.unlink(missing_ok=True)
     except OSError:
@@ -3417,7 +3764,15 @@ def confirm_clipboard_download(url: str, media_type: str) -> bool | None:
     return False
 
 
-def download_clipboard_url(url: str, download_dir: Path) -> list[str]:
+def download_clipboard_url(
+    url: str,
+    download_dir: Path,
+    batch_current: int = 0,
+    batch_total: int = 0,
+    show_summary: bool = True,
+) -> list[str]:
+    if show_summary:
+        DOWNLOAD_SUMMARY_FILES.clear()
     media_type = get_clipboard_media_type(url)
     normalized = normalize_user_url(url)
     source_type = "auto"
@@ -3426,7 +3781,8 @@ def download_clipboard_url(url: str, download_dir: Path) -> list[str]:
         saved_items = download_spotify_with_spotdl([normalized], download_dir)
         if saved_items:
             add_history_entries([normalized], "spotify", saved_items)
-            print_saved_summary(download_dir / "Spotify", saved_items)
+            if show_summary:
+                print_saved_summary(download_dir / "Spotify", saved_items, source=detect_site(normalized))
         return saved_items
 
     if is_youtube_channel_url(normalized):
@@ -3442,10 +3798,18 @@ def download_clipboard_url(url: str, download_dir: Path) -> list[str]:
             print(t("playlist_cancelled"))
             return []
 
-    saved_items = download([normalized], media_type, source_type, download_dir)
+    saved_items = download(
+        [normalized],
+        media_type,
+        source_type,
+        download_dir,
+        batch_current=batch_current,
+        batch_total=batch_total,
+    )
     if saved_items:
         add_history_entries([normalized], media_type, saved_items)
-        print_saved_summary(download_dir, saved_items)
+        if show_summary:
+            print_saved_summary(download_dir, saved_items, source=detect_site(normalized))
     return saved_items
 
 
@@ -3454,17 +3818,29 @@ def download_clipboard_queue(download_dir: Path) -> None:
     if not urls:
         print(t("clipboard_queue_empty"))
         return
+    DOWNLOAD_SUMMARY_FILES.clear()
+    saved_all: list[str] = []
+    failure_start = len(DOWNLOAD_FAILURES)
     total_saved = 0
-    for url in urls:
-        saved_items = download_clipboard_url(url, download_dir)
+    total_urls = len(urls)
+    for index, url in enumerate(urls, start=1):
+        saved_items = download_clipboard_url(url, download_dir, index, total_urls, show_summary=False)
+        saved_all.extend(saved_items)
         total_saved += len(saved_items)
     clear_clipboard_queue()
+    print_saved_summary(
+        download_dir,
+        saved_all,
+        source=t("main_clipboard"),
+        failures=DOWNLOAD_FAILURES[failure_start:],
+    )
     print(t("clipboard_queue_done", count=total_saved))
 
 
 def prompt_clipboard_queue(download_dir: Path) -> None:
     urls = read_clipboard_queue()
     if not urls:
+        print(t("clipboard_queue_empty"))
         return
     print()
     print(t("clipboard_queue_pending", count=len(urls), path=CLIPBOARD_QUEUE_FILE))
@@ -4109,18 +4485,28 @@ def load_cookie_header_from_file(cookie_file: str, url: str) -> str:
 
 
 def load_cookie_header_from_browser(browser: str, url: str) -> str:
-    if browser_cookie3 is None or not browser:
+    if not browser:
         return ""
-    loader = getattr(browser_cookie3, browser.lower(), None)
-    if loader is None:
-        return ""
-    try:
-        jar = loader(domain_name=urlparse(url).netloc)
-    except Exception:
+    jar = None
+    if browser_cookie3 is not None:
+        loader = getattr(browser_cookie3, browser.lower(), None)
+        if loader is not None:
+            try:
+                jar = loader(domain_name=urlparse(url).netloc)
+            except Exception:
+                jar = None
+        if jar is None:
+            try:
+                jar = browser_cookie3.load(domain_name=urlparse(url).netloc)
+            except Exception:
+                jar = None
+    if jar is None and browsercookie is not None:
         try:
-            jar = browser_cookie3.load(domain_name=urlparse(url).netloc)
+            jar = load_browser_cookie_jar(browser)
         except Exception:
-            return ""
+            jar = None
+    if jar is None:
+        return ""
     host = urlparse(url).netloc.lower()
     pairs: list[str] = []
     for cookie in jar:
@@ -4182,9 +4568,26 @@ def browser_label(browser: str) -> str:
 
 def load_browser_cookie_jar(browser: str):
     loader = browser_loader(browser)
-    if loader is None:
+    if loader is not None:
+        try:
+            return loader()
+        except Exception:
+            pass
+
+    if browsercookie is None:
         return None
-    return loader()
+
+    fallback_mapping = {
+        "chrome": "chrome",
+        "firefox": "firefox",
+        "brave": "brave",
+    }
+    fallback_name = fallback_mapping.get(browser.lower())
+    if fallback_name:
+        fallback_loader = getattr(browsercookie, fallback_name, None)
+        if fallback_loader is not None:
+            return fallback_loader()
+    return browsercookie.load()
 
 
 def ensure_python_import(package_name: str, import_name: str) -> bool:
@@ -4260,9 +4663,15 @@ def export_cookie_jar_to_netscape(jar, output_file: Path) -> int:
 
 def import_cookies_from_default_browser() -> tuple[bool, str, str]:
     global FACEBOOK_COOKIES_FROM_BROWSER, FACEBOOK_COOKIES_FILE
-    global browser_cookie3
+    global browser_cookie3, browsercookie
 
     if browser_cookie3 is None and not ensure_python_import("browser-cookie3", "browser_cookie3"):
+        browser_cookie3 = None
+
+    if browsercookie is None:
+        ensure_python_import("browsercookie", "browsercookie")
+
+    if browser_cookie3 is None and browsercookie is None:
         return False, "", t("cookies_import_missing_dependency")
 
     default_browser = detect_default_browser()
@@ -4636,8 +5045,78 @@ def get_collection_position(progress: dict) -> str:
     return t("download_item_counter", current=index_text, total=total_text)
 
 
+def get_collection_position_numbers(progress: dict) -> tuple[int, int] | None:
+    info = progress.get("info_dict") or {}
+    index = (
+        info.get("playlist_index")
+        or progress.get("playlist_index")
+        or info.get("__playlist_index")
+        or progress.get("__playlist_index")
+    )
+    total = (
+        info.get("playlist_count")
+        or info.get("n_entries")
+        or progress.get("playlist_count")
+        or progress.get("n_entries")
+    )
+    try:
+        index_int = int(index)
+        total_int = int(total)
+    except (TypeError, ValueError):
+        return None
+    if index_int <= 0 or total_int <= 1:
+        return None
+    return index_int, total_int
+
+
 def is_collection_progress(progress: dict) -> bool:
     return bool(get_collection_position(progress))
+
+
+def set_download_batch_position(current: int, total: int) -> None:
+    global DOWNLOAD_BATCH_CURRENT, DOWNLOAD_BATCH_TOTAL
+    DOWNLOAD_BATCH_CURRENT = max(0, int(current or 0))
+    DOWNLOAD_BATCH_TOTAL = max(0, int(total or 0))
+
+
+def clear_download_batch_position() -> None:
+    set_download_batch_position(0, 0)
+
+
+def get_download_batch_position() -> str:
+    if DOWNLOAD_BATCH_TOTAL <= 1 or DOWNLOAD_BATCH_CURRENT <= 0:
+        return ""
+    return f"[{DOWNLOAD_BATCH_CURRENT}/{DOWNLOAD_BATCH_TOTAL}]"
+
+
+def get_batch_position_numbers() -> tuple[int, int] | None:
+    if DOWNLOAD_BATCH_TOTAL <= 1 or DOWNLOAD_BATCH_CURRENT <= 0:
+        return None
+    return DOWNLOAD_BATCH_CURRENT, DOWNLOAD_BATCH_TOTAL
+
+
+def get_overall_progress_percent(progress: dict | None = None, current_percent: float | None = None) -> float | None:
+    position = get_collection_position_numbers(progress or {}) if progress is not None else None
+    if position is None:
+        position = get_batch_position_numbers()
+    if position is None:
+        return None
+
+    current, total = position
+    if current_percent is None:
+        current_percent = 100.0
+    current_percent = max(0.0, min(float(current_percent), 100.0))
+    overall = ((current - 1) + (current_percent / 100.0)) / total * 100.0
+    return max(0.0, min(overall, 100.0))
+
+
+def get_overall_progress_lines(overall_percent: float | None) -> list[str]:
+    if overall_percent is None:
+        return []
+    return [
+        f"{t('overall_progress')}: {overall_percent:.0f}%",
+        f"{make_progress_bar(overall_percent, PROGRESS_BAR_WIDTH)} {overall_percent:.0f}%",
+    ]
 
 
 def get_progress_title_line(progress: dict) -> str:
@@ -4645,6 +5124,9 @@ def get_progress_title_line(progress: dict) -> str:
     position = get_collection_position(progress)
     if position:
         return f"{position} | {title}"
+    batch_position = get_download_batch_position()
+    if batch_position:
+        return f"{batch_position} {title}"
     return title
 
 
@@ -4735,6 +5217,10 @@ def clear_status_line() -> None:
         print("", end="", flush=True)
 
 
+def print_retry_status(attempt: int, total: int) -> None:
+    print_status_block([t("retry_status", current=attempt, total=total)])
+
+
 def print_progress_line(progress: dict) -> None:
     percent = get_download_percent(progress)
     speed = format_speed(progress.get("speed"))
@@ -4742,38 +5228,50 @@ def print_progress_line(progress: dict) -> None:
     percent_text = f"{percent:.0f}%" if percent is not None else "--%"
     bar = make_progress_bar(percent, PROGRESS_BAR_WIDTH)
     title = shorten_text(get_progress_title_line(progress), STATUS_LINE_WIDTH)
+    lines = [
+        title,
+        f"{bar} {percent_text}",
+        f"{size_progress} {speed}",
+        f"ETA {get_eta_text(progress)}",
+    ]
+    lines.extend(get_overall_progress_lines(get_overall_progress_percent(progress, percent)))
     print_status_block(
-        [
-            title,
-            f"{bar} {percent_text}",
-            f"{size_progress} {speed}",
-            f"ETA {get_eta_text(progress)}",
-        ],
+        lines,
         full_screen=is_collection_progress(progress),
     )
 
 
 def print_conversion_line(progress: dict) -> None:
+    lines = [
+        shorten_text(get_progress_title_line(progress), STATUS_LINE_WIDTH),
+        f"{make_progress_bar(100, PROGRESS_BAR_WIDTH)} 100%",
+        t("conversion"),
+        "ETA 00:00",
+    ]
+    lines.extend(get_overall_progress_lines(get_overall_progress_percent(progress, 100.0)))
     print_status_block(
-        [
-            shorten_text(get_progress_title_line(progress), STATUS_LINE_WIDTH),
-            f"{make_progress_bar(100, PROGRESS_BAR_WIDTH)} 100%",
-            t("conversion"),
-            "ETA 00:00",
-        ],
+        lines,
         full_screen=is_collection_progress(progress),
     )
 
 
-def print_conversion_status(title: str, started_at: float, frame: str, full_screen: bool = False) -> None:
+def print_conversion_status(
+    title: str,
+    started_at: float,
+    frame: str,
+    full_screen: bool = False,
+    overall_percent: float | None = None,
+) -> None:
     elapsed = int(time.monotonic() - started_at)
+    lines = [
+        shorten_text(title, STATUS_LINE_WIDTH),
+        f"{make_progress_bar(100, PROGRESS_BAR_WIDTH)} 100%",
+        f"{frame} {t('conversion')} {format_seconds(elapsed)}",
+        "ETA 00:00",
+    ]
+    lines.extend(get_overall_progress_lines(overall_percent))
     print_status_block(
-        [
-            shorten_text(title, STATUS_LINE_WIDTH),
-            f"{make_progress_bar(100, PROGRESS_BAR_WIDTH)} 100%",
-            f"{frame} {t('conversion')} {format_seconds(elapsed)}",
-            "ETA 00:00",
-        ],
+        lines,
         full_screen=full_screen,
     )
 
@@ -4788,28 +5286,35 @@ def conversion_status_worker() -> None:
             started_at,
             frames[index % len(frames)],
             full_screen=CONVERSION_STATUS_FULLSCREEN,
+            overall_percent=CONVERSION_STATUS_OVERALL_PERCENT,
         )
         index += 1
         CONVERSION_STATUS_STOP.wait(0.5)
 
 
-def start_conversion_status(title: str, full_screen: bool = False) -> None:
-    global CONVERSION_STATUS_THREAD, CONVERSION_STATUS_TITLE, CONVERSION_STATUS_FULLSCREEN
+def start_conversion_status(
+    title: str,
+    full_screen: bool = False,
+    overall_percent: float | None = None,
+) -> None:
+    global CONVERSION_STATUS_THREAD, CONVERSION_STATUS_TITLE, CONVERSION_STATUS_FULLSCREEN, CONVERSION_STATUS_OVERALL_PERCENT
     if DEBUG:
         return
     if CONVERSION_STATUS_THREAD is not None and CONVERSION_STATUS_THREAD.is_alive():
         CONVERSION_STATUS_FULLSCREEN = CONVERSION_STATUS_FULLSCREEN or full_screen
+        CONVERSION_STATUS_OVERALL_PERCENT = overall_percent
         return
 
     CONVERSION_STATUS_TITLE = title or "Konwertowanie"
     CONVERSION_STATUS_FULLSCREEN = full_screen
+    CONVERSION_STATUS_OVERALL_PERCENT = overall_percent
     CONVERSION_STATUS_STOP.clear()
     CONVERSION_STATUS_THREAD = threading.Thread(target=conversion_status_worker, daemon=True)
     CONVERSION_STATUS_THREAD.start()
 
 
 def stop_conversion_status() -> None:
-    global CONVERSION_STATUS_THREAD, CONVERSION_STATUS_FULLSCREEN
+    global CONVERSION_STATUS_THREAD, CONVERSION_STATUS_FULLSCREEN, CONVERSION_STATUS_OVERALL_PERCENT
     if DEBUG:
         return
     CONVERSION_STATUS_STOP.set()
@@ -4817,6 +5322,7 @@ def stop_conversion_status() -> None:
         CONVERSION_STATUS_THREAD.join(timeout=1)
         CONVERSION_STATUS_THREAD = None
     CONVERSION_STATUS_FULLSCREEN = False
+    CONVERSION_STATUS_OVERALL_PERCENT = None
 
 
 def progress_hook(progress: dict) -> None:
@@ -4831,7 +5337,11 @@ def progress_hook(progress: dict) -> None:
     if status == "downloading":
         print_progress_line(progress)
     elif status == "finished":
-        start_conversion_status(get_progress_title_line(progress), is_collection_progress(progress))
+        start_conversion_status(
+            get_progress_title_line(progress),
+            is_collection_progress(progress),
+            get_overall_progress_percent(progress, 100.0),
+        )
 
 
 def postprocessor_hook(progress: dict) -> None:
@@ -4844,17 +5354,23 @@ def postprocessor_hook(progress: dict) -> None:
 
     status = progress.get("status")
     if status in {"started", "processing"}:
-        start_conversion_status(get_progress_title_line(progress), is_collection_progress(progress))
+        start_conversion_status(
+            get_progress_title_line(progress),
+            is_collection_progress(progress),
+            get_overall_progress_percent(progress, 100.0),
+        )
     elif status == "finished":
         stop_conversion_status()
         clear_status_line()
+        lines = [
+            shorten_text(get_progress_title_line(progress), STATUS_LINE_WIDTH),
+            f"{make_progress_bar(100, PROGRESS_BAR_WIDTH)} 100%",
+            t("saved_status"),
+            "ETA 00:00",
+        ]
+        lines.extend(get_overall_progress_lines(get_overall_progress_percent(progress, 100.0)))
         print_status_block(
-            [
-                shorten_text(get_progress_title_line(progress), STATUS_LINE_WIDTH),
-                f"{make_progress_bar(100, PROGRESS_BAR_WIDTH)} 100%",
-                t("saved_status"),
-                "ETA 00:00",
-            ],
+            lines,
             full_screen=is_collection_progress(progress),
         )
 
@@ -5483,7 +5999,12 @@ def download_spotify_with_spotdl(urls: Iterable[str], download_dir: Path) -> lis
 
 
 def download(
-    urls: Iterable[str], media_type: str, source_type: str, download_dir: Path
+    urls: Iterable[str],
+    media_type: str,
+    source_type: str,
+    download_dir: Path,
+    batch_current: int = 0,
+    batch_total: int = 0,
 ) -> list[str]:
     saved_items: list[str] = []
     if yt_dlp is None:
@@ -5502,9 +6023,16 @@ def download(
         print(f"Szczegoly zapisano w: {log_path}")
         return saved_items
 
+    urls = list(urls)
     strategies = get_workaround_strategies(media_type)
 
-    for url in urls:
+    for index, url in enumerate(urls, start=1):
+        if batch_total > 1:
+            set_download_batch_position(batch_current or index, batch_total)
+        elif len(urls) > 1:
+            set_download_batch_position(index, len(urls))
+        else:
+            clear_download_batch_position()
         clear_console()
         print(f"\n{t('download_label')} ({detect_site(url)}): {url}")
         print(t("download_stop_hint"))
@@ -5524,10 +6052,11 @@ def download(
             if resolved_url and resolved_url != url:
                 download_url = resolved_url
                 resolved_referer = url
-                print(t("hqporner_resolved"))
+                if DEBUG:
+                    print(t("hqporner_resolved"))
 
         for attempt, strategy in enumerate(strategies, start=1):
-            if attempt > 1:
+            if DEBUG and attempt > 1:
                 print()
                 print(
                     f"Proba obejscia problemu {attempt}/{len(strategies)}: {strategy['name']}..."
@@ -5557,6 +6086,7 @@ def download(
                 if downloaded_titles:
                     add_downloaded_files(len(downloaded_titles), get_download_stat_category(url))
                     saved_items.extend(downloaded_titles)
+                DOWNLOAD_SUMMARY_FILES.extend(COMPLETED_DOWNLOAD_FILES)
                 COMPLETED_DOWNLOAD_KEYS.clear()
                 COMPLETED_DOWNLOAD_TITLES.clear()
                 COMPLETED_DOWNLOAD_FILES.clear()
@@ -5574,11 +6104,13 @@ def download(
                 if downloaded_titles:
                     add_downloaded_files(len(downloaded_titles), get_download_stat_category(url))
                     saved_items.extend(downloaded_titles)
+                DOWNLOAD_SUMMARY_FILES.extend(COMPLETED_DOWNLOAD_FILES)
                 COMPLETED_DOWNLOAD_KEYS.clear()
                 COMPLETED_DOWNLOAD_TITLES.clear()
                 COMPLETED_DOWNLOAD_FILES.clear()
                 print(f"\n{exc}")
                 print(t("returning_to_menu"))
+                clear_download_batch_position()
                 return saved_items
             except Exception as exc:
                 COMPLETED_DOWNLOAD_KEYS.clear()
@@ -5589,24 +6121,31 @@ def download(
                     clear_status_line()
                 last_error = exc
                 if should_stop_retrying(exc):
+                    clear_status_line()
                     print(f"\nNie udalo sie: {format_user_error(exc)}")
                     print_error_details(exc)
                     break
                 if attempt < len(strategies):
-                    print(f"\nNie udalo sie: {format_user_error(exc)}")
-                    print_error_details(exc)
-                    print("Aplikacja sprobuje kolejnego sposobu automatycznie.")
+                    if DEBUG:
+                        print(f"\nNie udalo sie: {format_user_error(exc)}")
+                        print_error_details(exc)
+                        print("Aplikacja sprobuje kolejnego sposobu automatycznie.")
+                    else:
+                        print_retry_status(attempt + 1, len(strategies))
                 else:
+                    clear_status_line()
                     print(f"\nNie udalo sie po {len(strategies)} probach: {format_user_error(exc)}")
                     print_error_details(exc)
 
         if last_error is not None:
+            DOWNLOAD_FAILURES.append({"url": url, "error": format_user_error(last_error)})
             context = (
                 f"Nieudane pobieranie po {len(strategies)} probach. URL: {url}. "
                 f"Typ: {media_type}. Zrodlo: {source_type}."
             )
             log_path = write_error_log(last_error, context)
             print(t("details_saved", path=log_path))
+    clear_download_batch_position()
     return saved_items
 
 
@@ -5708,10 +6247,18 @@ def run_download_flow() -> None:
         if detected is None:
             return
         urls, source_type = detected
+        DOWNLOAD_SUMMARY_FILES.clear()
+        failure_start = len(DOWNLOAD_FAILURES)
         saved_items = download(urls, media_type, source_type, download_dir)
         if saved_items:
             add_history_entries(urls, media_type, saved_items)
-            print_saved_summary(download_dir, saved_items)
+            source_label = detect_site(urls[0]) if len(urls) == 1 else source_type
+            print_saved_summary(
+                download_dir,
+                saved_items,
+                source=source_label,
+                failures=DOWNLOAD_FAILURES[failure_start:],
+            )
 
 
 def main() -> None:
@@ -5732,6 +6279,7 @@ def main() -> None:
             clear_console()
             print_app_header()
             print()
+            print_language_update_hint_if_needed()
             print(get_download_counter_text())
             pending_queue_count = get_pending_large_file_queue_count()
             if pending_queue_count:

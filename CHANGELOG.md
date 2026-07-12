@@ -10,39 +10,47 @@ Planned release: https://github.com/needowsky/VideoDownloader/releases/tag/EXE-3
 
 ### Added
 
-- Background clipboard watcher now runs for the whole application session.
-- Clipboard links can be confirmed through popup prompts, postponed, ignored, or queued for later.
-- Clipboard queue, large-file queue, runtime configuration, statistics and history now use SQLite as active storage.
-- Total application usage time is tracked in SQLite config data and shown in `stats`.
-- `gimmeacookie.bat` can import cookies from the detected default browser.
-- Cookie import can self-install missing `browser-cookie3` into the local package folder before failing.
-- `gimmeacookie.bat` now reports that the application must be installed first when app files or Python runtime are missing.
-- Added a cleaner TUI text/style layer and refreshed progress bars so download status looks more modern.
+- Background clipboard watcher for the whole application session, with popup confirmation, postpone/ignore actions and persistent queue support.
+- SQLite-backed runtime configuration, statistics, counters, queues, history and total application usage time.
+- Cookie import from Settings and `gimmeacookie.bat`, including local self-install of missing cookie helper libraries.
+- Additional `browsercookie` fallback for browser cookie import when `browser-cookie3` cannot read the active profile.
+- Modern block download progress display with title, percent, downloaded/total MB, speed, ETA and overall progress for playlists/queues.
+- `update lang` for refreshing language packs without reinstalling the full app.
+- `update force` for reinstalling the latest app files even when the local version already matches the newest release.
+- HQPorner recognition and alternative-player/direct-media resolving.
+- Shared alternative direct-media resolver for naughties sources before falling back to `yt-dlp`.
+- `stats rangi` / `stats ranks` command with exact rank names and thresholds.
+- Expanded overall download rank scale with clearer long-term progression tiers.
+- Google Drive downloads now prefer `gdown`.
+- MEGA public-link downloads now prefer `mega-lite`.
 
 ### Changed
 
 - App version updated to `v3.5`.
 - AIO installer version updated to `v3.5`.
-- EXE installer release detection now targets releases such as `EXE-3.5`, `EXE_3.5` and `EXE 3.5`.
 - Release assets now use `VideoDownloader_AIO_Installer_EXE_3_5.exe` and `VideoDownloader_AIO_Installer_EXE_3_5.zip`.
+- EXE installer update checks now look for newer installer releases tagged/named like `EXE-3.5`, while app-file updates keep using normal application version releases.
+- App update detection now ignores installer-only `EXE-*` tags and selects the highest normal application version release.
+- PowerShell bootstrap `install.ps1` now defaults to the preferred EXE installer release and keeps the legacy batch installer available through `-DownloadMode branch` or `-DownloadMode release`.
+- README now puts the EXE installer first as the preferred install method and documents how users can add their own `.lang` translations based on `config/lang/en.lang`.
 - Runtime config is no longer actively written to `config.json`; that file is kept as a default/migration template.
-- Download progress bars now use a cleaner `<====------>` style instead of `[###...]` output, avoiding Windows console encoding crashes.
-- Installer progress display was refreshed to avoid old bracket/hash progress bars.
 - `uruchom_downloader.bat` now exposes local `python_packages` before starting bundled Python.
-- Download progress display now uses a modern block layout with percent, downloaded/total MB, speed and ETA.
 - Clipboard YouTube watch links now default to single-video mode by stripping playlist/radio parameters from copied links.
-- Added a Settings option for YouTube clipboard link mode: `auto`, `single` or `playlist`.
+- Settings now use selection menus for fixed values such as language, debug, popup, default media type, browser cookies and YouTube clipboard mode.
 - Playlist/channel downloads now show the current item number, for example `Item 3/175`, in the fixed progress block.
-- Main menu now shows only the latest detected clipboard link and queue size instead of printing every clipboard event into the console.
+- Main menu shows only the latest detected clipboard link and queue size instead of printing every clipboard event into the console.
 - Removed the abandoned external ripper flow from the app, installer and current documentation.
-- Download ranks were split into a separate overall scale and separate per-category scales for clearer `stats`.
-- Added HQPorner recognition and a dedicated `stats naughties` counter.
+- Download ranks are split into a separate overall scale and separate per-category scales for clearer `stats`.
+- Installer and updater support language packs from both repository paths (`config/lang/*.lang`) and flat GitHub release assets (`en.lang`, `pl.lang`), because GitHub release uploads do not preserve folders.
+- Installer helper packages now include `browsercookie`, `gdown` and `mega-lite`.
 
 ### Fixed
 
 - Fixed cookie import failing immediately when `browser-cookie3` was missing from the active Python environment.
 - Fixed package visibility issues when helper libraries are installed into the local `python_packages` folder.
+- Fixed `gimmeacookie.bat` so it reports that the application must be installed first when app files or Python runtime are missing.
 - Fixed clipboard command behavior after the background watcher was introduced: it now manages the queue instead of starting another watcher.
+- Fixed empty Clipboard Queue menu feedback and stale queue counters after downloading or clearing queued clipboard links.
 - Fixed main menu numbering so `5` opens Settings and `6` exits, preventing the Settings entry from closing the app after menu changes.
 - Improved cookie import for Google Chrome, Microsoft Edge and Mozilla Firefox, including clearer full-browser error details.
 - Enabled UTF-8 console output so block progress bars render correctly in Windows Terminal.
@@ -54,13 +62,11 @@ Planned release: https://github.com/needowsky/VideoDownloader/releases/tag/EXE-3
 - Added a `file:///...` folder URI fallback when clickable terminal hyperlinks are not supported.
 - Fixed playlist/channel progress drawing so the console no longer leaves a long empty receipt-like area above the active item.
 - Added a language-pack safety fallback: missing `.lang` files or missing translation keys now show a GitHub update/reinstall hint instead of crashing the app.
-- Settings now use selection menus for fixed values such as language, debug, popup, default media type, browser cookies and YouTube clipboard mode.
+- Missing or outdated language packs now show a colored main-menu hint telling the user to run `update lang`.
 - Custom language packs are now validated against the English base pack for missing keys and placeholder mismatches.
 - Existing filenames are no longer overwritten or skipped silently: new duplicates are saved with ` (1)`, ` (2)` etc., then the app asks whether to keep or remove the newly downloaded duplicate.
-- HQPorner downloads now try an alternative-player/direct-media resolver before falling back to the standard yt-dlp extractor.
 - HQPorner resolver now has a Selenium browser-render fallback inspired by bulk HQPorner/Eporner downloader projects: when static HTML parsing does not reveal a media URL, the app can render the page, click an alternative player and extract direct `.mp4`/`.m3u8` sources.
-- Installer helper packages now include Selenium so the HQPorner browser fallback can work after a fresh setup.
-- Pornhub and other naughties now use the same alternative direct-media resolver path: the app checks HTML/player metadata such as `videoUrl`, then can use Selenium browser rendering before falling back to `yt-dlp`.
+- Statistics config now writes a schema version so older saved stats are automatically refreshed to the current format on startup.
 - Added clearer download error definitions for `HTTP 410 Gone` and browser cookie database failures, and stopped pointless retry loops when a service reports that the material is gone.
 - Error logs now prefer the user's AppData folder and fall back to a temp log folder, avoiding crashes when the app cannot write beside installed files.
 - Pornhub links from localized domains such as `pl.pornhub.com` are normalized to `www.pornhub.com` and use a dedicated referer/origin header set before download.

@@ -2,8 +2,8 @@ param(
     [string]$InstallDir = "$env:ProgramFiles\VideoDownloader",
     [string]$Repo = "needowsky/VideoDownloader",
     [string]$Branch = "main",
-    [ValidateSet("branch", "release")]
-    [string]$DownloadMode = "branch",
+    [ValidateSet("exe", "branch", "release")]
+    [string]$DownloadMode = "exe",
     [ValidateSet("en", "pl")]
     [string]$Lang = "en",
     [switch]$Debug,
@@ -17,12 +17,14 @@ $ProgressPreference = "SilentlyContinue"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $InstallerName = "zainstaluj_wszystko.bat"
+$ExeInstallerNamePattern = "VideoDownloader_AIO_Installer*.exe"
 $LogRoot = Join-Path $env:TEMP "VideoDownloaderInstallLogs"
 $LogPath = Join-Path $LogRoot ("install_ps1_" + (Get-Date -Format "yyyyMMdd_HHmmss") + ".log")
 $LatestLogPath = Join-Path $LogRoot "install_ps1_latest.log"
 $RunningFromFile = [bool]$PSCommandPath
 $WorkDir = Join-Path $env:TEMP ("VideoDownloaderInstall_" + [guid]::NewGuid().ToString("N"))
 $InstallerPath = Join-Path $WorkDir $InstallerName
+$ExeInstallerPath = Join-Path $WorkDir "VideoDownloader_AIO_Installer.exe"
 
 New-Item -ItemType Directory -Force -Path $LogRoot | Out-Null
 
@@ -109,11 +111,171 @@ function Copy-InstallerFromDirectory {
     Copy-Item -Force -LiteralPath $source.FullName -Destination $InstallerPath
 }
 
+function Get-VersionNumbers {
+    param([string]$Value)
+
+    $numbers = @([regex]::Matches([string]$Value, "\d+") | ForEach-Object { [int]$_.Value })
+    if ($numbers.Count -eq 0) {
+        return @()
+    }
+    return $numbers
+}
+
+function Get-VersionKey {
+    param([string]$Value)
+
+    $numbers = Get-VersionNumbers $Value
+    if ($numbers.Count -eq 0) {
+        return $null
+    }
+    return (($numbers | ForEach-Object { $_.ToString("D8") }) -join ".")
+}
+
+function Test-AppRelease {
+    param($Release)
+
+    $tag = [string]$Release.tag_name
+    $name = [string]$Release.name
+    return (($tag -notmatch "^\s*EXE[\s_-]+v?\d") -and ($name -notmatch "^\s*EXE[\s_-]+v?\d"))
+}
+
+function Test-ExeRelease {
+    param($Release)
+
+    $tag = [string]$Release.tag_name
+    $name = [string]$Release.name
+    return (($tag -match "^\s*EXE[\s_-]+v?\d") -or ($name -match "^\s*EXE[\s_-]+v?\d"))
+}
+
+function Get-HighestVersionRelease {
+    param(
+        $Releases,
+        [switch]$Exe
+    )
+
+    $candidates = @()
+    foreach ($release in $Releases) {
+        if ($release.draft -or $release.prerelease) {
+            continue
+        }
+        $matchesType = if ($Exe) { Test-ExeRelease $release } else { Test-AppRelease $release }
+        if (-not $matchesType) {
+            continue
+        }
+
+        $label = [string]$release.tag_name
+        if ($label -notmatch "\d") {
+            $label = [string]$release.name
+        }
+        $key = Get-VersionKey $label
+        if ($key) {
+            $candidates += [pscustomobject]@{
+                Key = $key
+                Release = $release
+            }
+        }
+    }
+
+    if (-not $candidates) {
+        return $null
+    }
+    return ($candidates | Sort-Object Key -Descending | Select-Object -First 1).Release
+}
+
+function Get-BestExeAsset {
+    param($Release)
+
+    $assets = @($Release.assets)
+    if (-not $assets) {
+        return $null
+    }
+
+    $ranked = foreach ($asset in $assets) {
+        $name = [string]$asset.name
+        if (-not $asset.browser_download_url) {
+            continue
+        }
+        $score = 0
+        if ($name -like "*.exe") { $score += 100 }
+        if ($name -like "*.zip") { $score += 70 }
+        if ($name -match "AIO") { $score += 20 }
+        if ($name -match "Installer") { $score += 20 }
+        if ($name -match "VideoDownloader") { $score += 10 }
+        if ($score -gt 0) {
+            [pscustomobject]@{
+                Score = $score
+                Asset = $asset
+            }
+        }
+    }
+
+    return ($ranked | Sort-Object Score -Descending | Select-Object -First 1).Asset
+}
+
+function Expand-ExeAssetIfNeeded {
+    param([string]$AssetPath)
+
+    if ($AssetPath.ToLowerInvariant().EndsWith(".exe")) {
+        return $AssetPath
+    }
+    if (-not $AssetPath.ToLowerInvariant().EndsWith(".zip")) {
+        throw "Downloaded installer asset is not an EXE or ZIP: $AssetPath"
+    }
+
+    $extractPath = Join-Path $WorkDir "exe_asset"
+    if (Test-Path $extractPath) {
+        Remove-Item -Recurse -Force -LiteralPath $extractPath
+    }
+    New-Item -ItemType Directory -Force -Path $extractPath | Out-Null
+    Expand-Archive -Force -Path $AssetPath -DestinationPath $extractPath
+    $exe = Get-ChildItem -Path $extractPath -Recurse -File -Filter "*.exe" |
+        Where-Object { $_.Name -like $ExeInstallerNamePattern -or $_.Name -match "AIO|Installer|VideoDownloader" } |
+        Sort-Object @{ Expression = { if ($_.Name -like $ExeInstallerNamePattern) { 0 } else { 1 } } }, Length -Descending |
+        Select-Object -First 1
+    if (-not $exe) {
+        throw "Downloaded EXE ZIP does not contain a Video Downloader installer."
+    }
+    return $exe.FullName
+}
+
+function Try-DownloadLatestExeInstaller {
+    try {
+        $apiUrl = "https://api.github.com/repos/$Repo/releases?per_page=50"
+        Write-Log "Checking GitHub EXE releases by version: $apiUrl"
+        $releases = Invoke-RestMethod -Headers @{ "User-Agent" = "VideoDownloaderPowerShellInstaller" } -Uri $apiUrl
+        $release = Get-HighestVersionRelease -Releases $releases -Exe
+        if (-not $release) {
+            throw "No versioned EXE installer release found."
+        }
+
+        $asset = Get-BestExeAsset -Release $release
+        if (-not $asset) {
+            throw "Selected EXE release has no installer EXE/ZIP asset."
+        }
+
+        $assetName = [string]$asset.name
+        $assetPath = Join-Path $WorkDir $assetName
+        Write-ScreenLog "Installer release: $($release.tag_name)"
+        Write-ScreenLog "Installer asset:   $assetName"
+        Invoke-Download -Url $asset.browser_download_url -OutFile $assetPath
+        $resolvedExe = Expand-ExeAssetIfNeeded -AssetPath $assetPath
+        Copy-Item -Force -LiteralPath $resolvedExe -Destination $ExeInstallerPath
+        return $true
+    } catch {
+        Write-ScreenLog "EXE release download failed: $($_.Exception.Message)"
+        return $false
+    }
+}
+
 function Try-DownloadLatestReleaseInstaller {
     try {
-        $apiUrl = "https://api.github.com/repos/$Repo/releases/latest"
-        Write-Log "Checking latest GitHub release: $apiUrl"
-        $release = Invoke-RestMethod -Headers @{ "User-Agent" = "VideoDownloaderPowerShellInstaller" } -Uri $apiUrl
+        $apiUrl = "https://api.github.com/repos/$Repo/releases?per_page=50"
+        Write-Log "Checking GitHub releases by version: $apiUrl"
+        $releases = Invoke-RestMethod -Headers @{ "User-Agent" = "VideoDownloaderPowerShellInstaller" } -Uri $apiUrl
+        $release = Get-HighestVersionRelease $releases
+        if (-not $release) {
+            throw "No versioned application release found."
+        }
 
         $asset = $release.assets | Where-Object { $_.name -ieq $InstallerName } | Select-Object -First 1
         if ($asset) {
@@ -122,7 +284,7 @@ function Try-DownloadLatestReleaseInstaller {
         }
 
         if (-not $release.zipball_url) {
-            throw "Latest release does not contain $InstallerName or source zip."
+            throw "Selected release does not contain $InstallerName or source zip."
         }
 
         $zipPath = Join-Path $WorkDir "release.zip"
@@ -153,6 +315,25 @@ function Try-DownloadRawInstaller {
         Write-ScreenLog "Raw branch '$RawBranch' failed: $($_.Exception.Message)"
         return $false
     }
+}
+
+function Start-ExeInstaller {
+    $env:INSTALL_DIR = $InstallDir
+    $env:GITHUB_REPO = $Repo
+    $env:GITHUB_BRANCH = $Branch
+    $env:DEBUG = if ($Debug) { "1" } else { "0" }
+    $env:LANG = $Lang
+
+    if ($NoRun) {
+        Write-ScreenLog "NoRun enabled. EXE installer downloaded to: $ExeInstallerPath"
+        return
+    }
+
+    Write-ScreenLog "Opening preferred EXE installer..."
+    Write-ScreenLog "Continue installation in the installer window."
+    Write-Log "Starting EXE installer: $ExeInstallerPath"
+    Start-Process -FilePath $ExeInstallerPath -WorkingDirectory $WorkDir | Out-Null
+    Write-Log "EXE installer started."
 }
 
 function Update-InstallerSettings {
@@ -235,9 +416,23 @@ try {
     Write-Step 1 4 "Preparing installer workspace"
     Write-ScreenLog "Workspace: $WorkDir"
 
-    Write-Step 2 4 "Downloading AIO installer from GitHub"
+    Write-Step 2 4 "Downloading installer from GitHub"
     $downloaded = $false
-    if ($DownloadMode -ieq "branch") {
+    $usingExe = $false
+    if ($DownloadMode -ieq "exe") {
+        $downloaded = Try-DownloadLatestExeInstaller
+        $usingExe = $downloaded
+        if (-not $downloaded) {
+            Write-ScreenLog "Falling back to batch installer from main branch..."
+            $downloaded = Try-DownloadRawInstaller -RawBranch $Branch
+        }
+        if (-not $downloaded -and $Branch -ine "master") {
+            $downloaded = Try-DownloadRawInstaller -RawBranch "master"
+        }
+        if (-not $downloaded) {
+            $downloaded = Try-DownloadLatestReleaseInstaller
+        }
+    } elseif ($DownloadMode -ieq "branch") {
         $downloaded = Try-DownloadRawInstaller -RawBranch $Branch
         if (-not $downloaded -and $Branch -ine "master") {
             $downloaded = Try-DownloadRawInstaller -RawBranch "master"
@@ -255,14 +450,22 @@ try {
         }
     }
     if (-not $downloaded) {
-        throw "Cannot download $InstallerName from GitHub. Check internet connection, repository visibility and release files."
+        throw "Cannot download installer from GitHub. Check internet connection, repository visibility and release files."
     }
 
-    Write-Step 3 4 "Applying installer settings"
-    Update-InstallerSettings
+    if ($usingExe) {
+        Write-Step 3 4 "Preparing EXE installer settings"
+        Write-Log "EXE installer will receive settings through environment variables."
 
-    Write-Step 4 4 "Opening full installer"
-    Start-AioInstaller
+        Write-Step 4 4 "Opening preferred EXE installer"
+        Start-ExeInstaller
+    } else {
+        Write-Step 3 4 "Applying batch installer settings"
+        Update-InstallerSettings
+
+        Write-Step 4 4 "Opening full batch installer"
+        Start-AioInstaller
+    }
     Save-LogCopyToInstallDir
 } catch {
     $hadError = $true

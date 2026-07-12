@@ -104,6 +104,10 @@ if /i "%GITHUB_UPDATES%"=="1" (
 
     )
 
+    call :NormalizeLanguageFiles
+
+    call :DownloadLanguageAssetsFromLatestRelease
+
     call :DownloadAppAssets
 
     call :ApplyProgramLanguage
@@ -113,6 +117,8 @@ if /i "%GITHUB_UPDATES%"=="1" (
 ) else (
 
     >> "%INSTALL_LOG%" echo GITHUB_UPDATES=0 - using local installer files.
+
+    call :NormalizeLanguageFiles
 
     call :ApplyProgramLanguage
 
@@ -364,7 +370,7 @@ if not defined PYTHON_EXE (
 
 )
 
-"%PYTHON_EXE%" -c "import yt_dlp, gallery_dl, spotdl, rich, textual, browser_cookie3, bs4, lxml, mutagen, selenium, sqlite3" >> "%INSTALL_LOG%" 2>&1
+"%PYTHON_EXE%" -c "import yt_dlp, gallery_dl, spotdl, rich, textual, browser_cookie3, browsercookie, bs4, lxml, mutagen, selenium, gdown, mega_downloader, sqlite3" >> "%INSTALL_LOG%" 2>&1
 
 if errorlevel 1 (
 
@@ -512,11 +518,11 @@ exit /b 1
 
 if "%DEBUG%"=="1" (
 
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; function Get-Numbers($v){ $n=@([regex]::Matches([string]$v,'\d+') | ForEach-Object {[int]$_.Value}); if($n.Count -eq 0){ return @(0) }; return $n }; function Compare-Version($a,$b){ $av=Get-Numbers $a; $bv=Get-Numbers $b; $max=[Math]::Max($av.Count,$bv.Count); for($i=0;$i -lt $max;$i++){ $ai=0; $bi=0; if($i -lt $av.Count){ $ai=$av[$i] }; if($i -lt $bv.Count){ $bi=$bv[$i] }; if($ai -gt $bi){ return 1 }; if($ai -lt $bi){ return -1 } }; return 0 }; $repo='%GITHUB_REPO%'; $api='https://api.github.com/repos/' + $repo + '/releases/latest'; $release=Invoke-RestMethod -Uri $api -Headers @{'User-Agent'='VideoDownloaderInstaller'}; $releaseName=([string]$release.name).Trim(); $releaseTag=([string]$release.tag_name).Trim(); if($releaseName -match '\d'){ $latest=$releaseName } else { $latest=$releaseTag }; if(-not $latest){ $latest=$releaseName }; if(-not $latest){ throw 'No release version in latest release' }; $current=''; if(Test-Path 'youtube_downloader.py'){ $line=Select-String -Path 'youtube_downloader.py' -Pattern 'APP_VERSION' | Select-Object -First 1; if($line){ $m=[regex]::Match($line.Line,'v?\d+(\.\d+)*'); if($m.Success){ $current=$m.Value.Trim() } } }; if($current -and ((Compare-Version $latest $current) -le 0)){ Write-Host ('Current version ' + $current + ' is up to date. Latest: ' + $latest); exit 0 }; Write-Host ('Installing app version ' + $latest + ($(if($current){ ' over ' + $current } else { '' }))); $zipUrl=$release.zipball_url; if(-not $zipUrl){ throw 'No zipball_url in latest release' }; $zip=Join-Path $env:TEMP 'vd_latest_release.zip'; $tmp=Join-Path $env:TEMP ('vd_release_'+[guid]::NewGuid().ToString()); Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -Headers @{'User-Agent'='VideoDownloaderInstaller'} -OutFile $zip; Expand-Archive -Force -Path $zip -DestinationPath $tmp; $root=Get-ChildItem -Path $tmp -Directory | Select-Object -First 1; if(-not $root){ throw 'Release archive is empty' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','gimmeacookie.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat','config/config.json','config/stats.json','config/lang/en.lang','config/lang/pl.lang','assets/video_downloader.ico','assets/video_downloader.png','aio_installer/VideoDownloader_AIO_Installer.py','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.exe','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.zip'); foreach($file in $files){ $src=Join-Path $root.FullName $file; if(Test-Path $src){ $dest=$file; $destDir=Split-Path -Parent $dest; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Copy-Item -Force -LiteralPath $src -Destination $dest } else { Write-Host ('Skipped missing file: ' + $file) } }; exit 0"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; function Get-Numbers($v){ $n=@([regex]::Matches([string]$v,'\d+') | ForEach-Object {[int]$_.Value}); if($n.Count -eq 0){ return @(0) }; return $n }; function Compare-Version($a,$b){ $av=Get-Numbers $a; $bv=Get-Numbers $b; $max=[Math]::Max($av.Count,$bv.Count); for($i=0;$i -lt $max;$i++){ $ai=0; $bi=0; if($i -lt $av.Count){ $ai=$av[$i] }; if($i -lt $bv.Count){ $bi=$bv[$i] }; if($ai -gt $bi){ return 1 }; if($ai -lt $bi){ return -1 } }; return 0 }; $repo='%GITHUB_REPO%'; $api='https://api.github.com/repos/' + $repo + '/releases?per_page=50'; $releases=Invoke-RestMethod -Uri $api -Headers @{'User-Agent'='VideoDownloaderInstaller'}; $candidates=@(); foreach($r in $releases){ if($r.draft -or $r.prerelease){ continue }; $tag=([string]$r.tag_name).Trim(); $name=([string]$r.name).Trim(); if($tag -match '^\s*EXE[\s_-]+v?\d' -or $name -match '^\s*EXE[\s_-]+v?\d'){ continue }; $label=$tag; if($label -notmatch '\d'){ $label=$name }; if($label -match '\d'){ $nums=Get-Numbers $label; $key=($nums | ForEach-Object { $_.ToString('D8') }) -join '.'; $candidates += [pscustomobject]@{Key=$key; Label=$label; Release=$r} } }; if(-not $candidates){ throw 'No versioned application release found.' }; $selected=$candidates | Sort-Object Key -Descending | Select-Object -First 1; $release=$selected.Release; $latest=$selected.Label;  $current=''; if(Test-Path 'youtube_downloader.py'){ $line=Select-String -Path 'youtube_downloader.py' -Pattern 'APP_VERSION' | Select-Object -First 1; if($line){ $m=[regex]::Match($line.Line,'v?\d+(\.\d+)*'); if($m.Success){ $current=$m.Value.Trim() } } }; if($current -and ((Compare-Version $latest $current) -le 0)){ Write-Host ('Current version ' + $current + ' is up to date. Latest: ' + $latest); exit 0 }; Write-Host ('Installing app version ' + $latest + ($(if($current){ ' over ' + $current } else { '' }))); $zipUrl=$release.zipball_url; if(-not $zipUrl){ throw 'No zipball_url in selected release' }; $zip=Join-Path $env:TEMP 'vd_latest_release.zip'; $tmp=Join-Path $env:TEMP ('vd_release_'+[guid]::NewGuid().ToString()); Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -Headers @{'User-Agent'='VideoDownloaderInstaller'} -OutFile $zip; Expand-Archive -Force -Path $zip -DestinationPath $tmp; $root=Get-ChildItem -Path $tmp -Directory | Select-Object -First 1; if(-not $root){ throw 'Release archive is empty' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','gimmeacookie.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat','config/config.json','config/stats.json','config/lang/en.lang','config/lang/pl.lang','en.lang','pl.lang','assets/video_downloader.ico','assets/video_downloader.png','aio_installer/VideoDownloader_AIO_Installer.py','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.exe','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.zip'); foreach($file in $files){ $src=Join-Path $root.FullName $file; if(Test-Path $src){ $dest=$file; $destDir=Split-Path -Parent $dest; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Copy-Item -Force -LiteralPath $src -Destination $dest } else { Write-Host ('Skipped missing file: ' + $file) } }; exit 0"
 
 ) else (
 
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; function Get-Numbers($v){ $n=@([regex]::Matches([string]$v,'\d+') | ForEach-Object {[int]$_.Value}); if($n.Count -eq 0){ return @(0) }; return $n }; function Compare-Version($a,$b){ $av=Get-Numbers $a; $bv=Get-Numbers $b; $max=[Math]::Max($av.Count,$bv.Count); for($i=0;$i -lt $max;$i++){ $ai=0; $bi=0; if($i -lt $av.Count){ $ai=$av[$i] }; if($i -lt $bv.Count){ $bi=$bv[$i] }; if($ai -gt $bi){ return 1 }; if($ai -lt $bi){ return -1 } }; return 0 }; $repo='%GITHUB_REPO%'; $api='https://api.github.com/repos/' + $repo + '/releases/latest'; $release=Invoke-RestMethod -Uri $api -Headers @{'User-Agent'='VideoDownloaderInstaller'}; $releaseName=([string]$release.name).Trim(); $releaseTag=([string]$release.tag_name).Trim(); if($releaseName -match '\d'){ $latest=$releaseName } else { $latest=$releaseTag }; if(-not $latest){ $latest=$releaseName }; if(-not $latest){ throw 'No release version in latest release' }; $current=''; if(Test-Path 'youtube_downloader.py'){ $line=Select-String -Path 'youtube_downloader.py' -Pattern 'APP_VERSION' | Select-Object -First 1; if($line){ $m=[regex]::Match($line.Line,'v?\d+(\.\d+)*'); if($m.Success){ $current=$m.Value.Trim() } } }; if($current -and ((Compare-Version $latest $current) -le 0)){ Write-Output ('Current version ' + $current + ' is up to date. Latest: ' + $latest); exit 0 }; Write-Output ('Installing app version ' + $latest + ($(if($current){ ' over ' + $current } else { '' }))); $zipUrl=$release.zipball_url; if(-not $zipUrl){ throw 'No zipball_url in latest release' }; $zip=Join-Path $env:TEMP 'vd_latest_release.zip'; $tmp=Join-Path $env:TEMP ('vd_release_'+[guid]::NewGuid().ToString()); Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -Headers @{'User-Agent'='VideoDownloaderInstaller'} -OutFile $zip; Expand-Archive -Force -Path $zip -DestinationPath $tmp; $root=Get-ChildItem -Path $tmp -Directory | Select-Object -First 1; if(-not $root){ throw 'Release archive is empty' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','gimmeacookie.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat','config/config.json','config/stats.json','config/lang/en.lang','config/lang/pl.lang','assets/video_downloader.ico','assets/video_downloader.png','aio_installer/VideoDownloader_AIO_Installer.py','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.exe','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.zip'); foreach($file in $files){ $src=Join-Path $root.FullName $file; if(Test-Path $src){ $dest=$file; $destDir=Split-Path -Parent $dest; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Copy-Item -Force -LiteralPath $src -Destination $dest } }; exit 0" >> "%INSTALL_LOG%" 2>&1
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; function Get-Numbers($v){ $n=@([regex]::Matches([string]$v,'\d+') | ForEach-Object {[int]$_.Value}); if($n.Count -eq 0){ return @(0) }; return $n }; function Compare-Version($a,$b){ $av=Get-Numbers $a; $bv=Get-Numbers $b; $max=[Math]::Max($av.Count,$bv.Count); for($i=0;$i -lt $max;$i++){ $ai=0; $bi=0; if($i -lt $av.Count){ $ai=$av[$i] }; if($i -lt $bv.Count){ $bi=$bv[$i] }; if($ai -gt $bi){ return 1 }; if($ai -lt $bi){ return -1 } }; return 0 }; $repo='%GITHUB_REPO%'; $api='https://api.github.com/repos/' + $repo + '/releases?per_page=50'; $releases=Invoke-RestMethod -Uri $api -Headers @{'User-Agent'='VideoDownloaderInstaller'}; $candidates=@(); foreach($r in $releases){ if($r.draft -or $r.prerelease){ continue }; $tag=([string]$r.tag_name).Trim(); $name=([string]$r.name).Trim(); if($tag -match '^\s*EXE[\s_-]+v?\d' -or $name -match '^\s*EXE[\s_-]+v?\d'){ continue }; $label=$tag; if($label -notmatch '\d'){ $label=$name }; if($label -match '\d'){ $nums=Get-Numbers $label; $key=($nums | ForEach-Object { $_.ToString('D8') }) -join '.'; $candidates += [pscustomobject]@{Key=$key; Label=$label; Release=$r} } }; if(-not $candidates){ throw 'No versioned application release found.' }; $selected=$candidates | Sort-Object Key -Descending | Select-Object -First 1; $release=$selected.Release; $latest=$selected.Label;  $current=''; if(Test-Path 'youtube_downloader.py'){ $line=Select-String -Path 'youtube_downloader.py' -Pattern 'APP_VERSION' | Select-Object -First 1; if($line){ $m=[regex]::Match($line.Line,'v?\d+(\.\d+)*'); if($m.Success){ $current=$m.Value.Trim() } } }; if($current -and ((Compare-Version $latest $current) -le 0)){ Write-Output ('Current version ' + $current + ' is up to date. Latest: ' + $latest); exit 0 }; Write-Output ('Installing app version ' + $latest + ($(if($current){ ' over ' + $current } else { '' }))); $zipUrl=$release.zipball_url; if(-not $zipUrl){ throw 'No zipball_url in selected release' }; $zip=Join-Path $env:TEMP 'vd_latest_release.zip'; $tmp=Join-Path $env:TEMP ('vd_release_'+[guid]::NewGuid().ToString()); Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -Headers @{'User-Agent'='VideoDownloaderInstaller'} -OutFile $zip; Expand-Archive -Force -Path $zip -DestinationPath $tmp; $root=Get-ChildItem -Path $tmp -Directory | Select-Object -First 1; if(-not $root){ throw 'Release archive is empty' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','gimmeacookie.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat','config/config.json','config/stats.json','config/lang/en.lang','config/lang/pl.lang','en.lang','pl.lang','assets/video_downloader.ico','assets/video_downloader.png','aio_installer/VideoDownloader_AIO_Installer.py','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.exe','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.zip'); foreach($file in $files){ $src=Join-Path $root.FullName $file; if(Test-Path $src){ $dest=$file; $destDir=Split-Path -Parent $dest; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Copy-Item -Force -LiteralPath $src -Destination $dest } }; exit 0" >> "%INSTALL_LOG%" 2>&1
 
 )
 
@@ -528,15 +534,59 @@ set "DOWNLOAD_BRANCH=%~1"
 
 if "%DEBUG%"=="1" (
 
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $repo='%GITHUB_REPO%'; $branch='%DOWNLOAD_BRANCH%'; $zip=Join-Path $env:TEMP ('vd_branch_' + [guid]::NewGuid().ToString('N') + '.zip'); $tmp=Join-Path $env:TEMP ('vd_branch_' + [guid]::NewGuid().ToString('N')); $url='https://codeload.github.com/' + $repo + '/zip/refs/heads/' + $branch; Write-Host ('Downloading repository zip from ' + $branch); Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='VideoDownloaderInstaller'} -Uri $url -OutFile $zip; Expand-Archive -Force -Path $zip -DestinationPath $tmp; $root=Get-ChildItem -Path $tmp -Directory | Select-Object -First 1; if(-not $root){ throw 'Branch archive is empty' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','gimmeacookie.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat','config/config.json','config/stats.json','config/lang/en.lang','config/lang/pl.lang','assets/video_downloader.ico','assets/video_downloader.png','aio_installer/VideoDownloader_AIO_Installer.py','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.exe','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.zip'); foreach($file in $files){ $src=Join-Path $root.FullName $file; if(Test-Path $src){ $dest=$file; $destDir=Split-Path -Parent $dest; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Copy-Item -Force -LiteralPath $src -Destination $dest; Write-Host ('Updated ' + $file) } else { Write-Host ('Skipped missing file: ' + $file) } }; exit 0"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $repo='%GITHUB_REPO%'; $branch='%DOWNLOAD_BRANCH%'; $zip=Join-Path $env:TEMP ('vd_branch_' + [guid]::NewGuid().ToString('N') + '.zip'); $tmp=Join-Path $env:TEMP ('vd_branch_' + [guid]::NewGuid().ToString('N')); $url='https://codeload.github.com/' + $repo + '/zip/refs/heads/' + $branch; Write-Host ('Downloading repository zip from ' + $branch); Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='VideoDownloaderInstaller'} -Uri $url -OutFile $zip; Expand-Archive -Force -Path $zip -DestinationPath $tmp; $root=Get-ChildItem -Path $tmp -Directory | Select-Object -First 1; if(-not $root){ throw 'Branch archive is empty' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','gimmeacookie.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat','config/config.json','config/stats.json','config/lang/en.lang','config/lang/pl.lang','en.lang','pl.lang','assets/video_downloader.ico','assets/video_downloader.png','aio_installer/VideoDownloader_AIO_Installer.py','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.exe','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.zip'); foreach($file in $files){ $src=Join-Path $root.FullName $file; if(Test-Path $src){ $dest=$file; $destDir=Split-Path -Parent $dest; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Copy-Item -Force -LiteralPath $src -Destination $dest; Write-Host ('Updated ' + $file) } else { Write-Host ('Skipped missing file: ' + $file) } }; exit 0"
 
 ) else (
 
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $repo='%GITHUB_REPO%'; $branch='%DOWNLOAD_BRANCH%'; $zip=Join-Path $env:TEMP ('vd_branch_' + [guid]::NewGuid().ToString('N') + '.zip'); $tmp=Join-Path $env:TEMP ('vd_branch_' + [guid]::NewGuid().ToString('N')); $url='https://codeload.github.com/' + $repo + '/zip/refs/heads/' + $branch; Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='VideoDownloaderInstaller'} -Uri $url -OutFile $zip; Expand-Archive -Force -Path $zip -DestinationPath $tmp; $root=Get-ChildItem -Path $tmp -Directory | Select-Object -First 1; if(-not $root){ throw 'Branch archive is empty' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','gimmeacookie.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat','config/config.json','config/stats.json','config/lang/en.lang','config/lang/pl.lang','assets/video_downloader.ico','assets/video_downloader.png','aio_installer/VideoDownloader_AIO_Installer.py','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.exe','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.zip'); foreach($file in $files){ $src=Join-Path $root.FullName $file; if(Test-Path $src){ $dest=$file; $destDir=Split-Path -Parent $dest; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Copy-Item -Force -LiteralPath $src -Destination $dest } }; exit 0" >> "%INSTALL_LOG%" 2>&1
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $repo='%GITHUB_REPO%'; $branch='%DOWNLOAD_BRANCH%'; $zip=Join-Path $env:TEMP ('vd_branch_' + [guid]::NewGuid().ToString('N') + '.zip'); $tmp=Join-Path $env:TEMP ('vd_branch_' + [guid]::NewGuid().ToString('N')); $url='https://codeload.github.com/' + $repo + '/zip/refs/heads/' + $branch; Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='VideoDownloaderInstaller'} -Uri $url -OutFile $zip; Expand-Archive -Force -Path $zip -DestinationPath $tmp; $root=Get-ChildItem -Path $tmp -Directory | Select-Object -First 1; if(-not $root){ throw 'Branch archive is empty' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','gimmeacookie.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat','config/config.json','config/stats.json','config/lang/en.lang','config/lang/pl.lang','en.lang','pl.lang','assets/video_downloader.ico','assets/video_downloader.png','aio_installer/VideoDownloader_AIO_Installer.py','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.exe','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.zip'); foreach($file in $files){ $src=Join-Path $root.FullName $file; if(Test-Path $src){ $dest=$file; $destDir=Split-Path -Parent $dest; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Copy-Item -Force -LiteralPath $src -Destination $dest } }; exit 0" >> "%INSTALL_LOG%" 2>&1
 
 )
 
 exit /b %ERRORLEVEL%
+
+:NormalizeLanguageFiles
+
+if not exist "config" mkdir "config" >nul 2>nul
+
+if not exist "config\lang" mkdir "config\lang" >nul 2>nul
+
+if exist "en.lang" (
+
+    copy /Y "en.lang" "config\lang\en.lang" >nul 2>nul
+
+    del /Q "en.lang" >nul 2>nul
+
+)
+
+if exist "pl.lang" (
+
+    copy /Y "pl.lang" "config\lang\pl.lang" >nul 2>nul
+
+    del /Q "pl.lang" >nul 2>nul
+
+)
+
+exit /b 0
+
+:DownloadLanguageAssetsFromLatestRelease
+
+if /i not "%GITHUB_UPDATES%"=="1" exit /b 0
+
+if not exist "config" mkdir "config" >nul 2>nul
+
+if not exist "config\lang" mkdir "config\lang" >nul 2>nul
+
+if "%DEBUG%"=="1" (
+
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Continue'; $ProgressPreference='SilentlyContinue'; $repo='%GITHUB_REPO%'; function Get-Numbers($v){ $n=@([regex]::Matches([string]$v,'\d+') | ForEach-Object {[int]$_.Value}); if($n.Count -eq 0){ return @(0) }; return $n }; $api='https://api.github.com/repos/' + $repo + '/releases?per_page=50'; $releases=Invoke-RestMethod -Uri $api -Headers @{'User-Agent'='VideoDownloaderInstaller'}; $candidates=@(); foreach($r in $releases){ if($r.draft -or $r.prerelease){ continue }; $tag=([string]$r.tag_name).Trim(); $name=([string]$r.name).Trim(); if($tag -match '^\s*EXE[\s_-]+v?\d' -or $name -match '^\s*EXE[\s_-]+v?\d'){ continue }; $label=$tag; if($label -notmatch '\d'){ $label=$name }; if($label -match '\d'){ $nums=Get-Numbers $label; $key=($nums | ForEach-Object { $_.ToString('D8') }) -join '.'; $candidates += [pscustomobject]@{Key=$key; Label=$label; Release=$r} } }; if(-not $candidates){ throw 'No versioned application release found.' }; $selected=$candidates | Sort-Object Key -Descending | Select-Object -First 1; $release=$selected.Release; $latest=$selected.Label; foreach($lang in @('en.lang','pl.lang')){ $asset=$release.assets | Where-Object { $_.name -ieq $lang } | Select-Object -First 1; if($asset -and $asset.browser_download_url){ $dest=Join-Path 'config\lang' $lang; Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='VideoDownloaderInstaller'} -Uri $asset.browser_download_url -OutFile $dest; Write-Host ('Updated language asset: ' + $lang) } }; exit 0"
+
+) else (
+
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Continue'; $ProgressPreference='SilentlyContinue'; $repo='%GITHUB_REPO%'; function Get-Numbers($v){ $n=@([regex]::Matches([string]$v,'\d+') | ForEach-Object {[int]$_.Value}); if($n.Count -eq 0){ return @(0) }; return $n }; $api='https://api.github.com/repos/' + $repo + '/releases?per_page=50'; $releases=Invoke-RestMethod -Uri $api -Headers @{'User-Agent'='VideoDownloaderInstaller'}; $candidates=@(); foreach($r in $releases){ if($r.draft -or $r.prerelease){ continue }; $tag=([string]$r.tag_name).Trim(); $name=([string]$r.name).Trim(); if($tag -match '^\s*EXE[\s_-]+v?\d' -or $name -match '^\s*EXE[\s_-]+v?\d'){ continue }; $label=$tag; if($label -notmatch '\d'){ $label=$name }; if($label -match '\d'){ $nums=Get-Numbers $label; $key=($nums | ForEach-Object { $_.ToString('D8') }) -join '.'; $candidates += [pscustomobject]@{Key=$key; Label=$label; Release=$r} } }; if(-not $candidates){ throw 'No versioned application release found.' }; $selected=$candidates | Sort-Object Key -Descending | Select-Object -First 1; $release=$selected.Release; $latest=$selected.Label; foreach($lang in @('en.lang','pl.lang')){ $asset=$release.assets | Where-Object { $_.name -ieq $lang } | Select-Object -First 1; if($asset -and $asset.browser_download_url){ $dest=Join-Path 'config\lang' $lang; Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='VideoDownloaderInstaller'} -Uri $asset.browser_download_url -OutFile $dest } }; exit 0" >> "%INSTALL_LOG%" 2>&1
+
+)
+
+exit /b 0
 
 :StepStart
 
@@ -899,7 +949,7 @@ if /i "%ERR_STAGE%"=="helper packages" (
 
     echo Error type: UI/helper libraries installation failed.
 
-    echo Reason: pip could not install Rich/Textual/browser-cookie3/BeautifulSoup/lxml/mutagen/Selenium, usually because PyPI is blocked, Python is broken, or build wheels are unavailable.
+    echo Reason: pip could not install Rich/Textual/browser-cookie3/browsercookie/BeautifulSoup/lxml/mutagen/Selenium/gdown/mega-lite, usually because PyPI is blocked, Python is broken, or build wheels are unavailable.
 
     echo How to fix: Check internet, run as administrator, unblock Python in firewall, then run the installer again.
 
@@ -1475,6 +1525,10 @@ call :InstallPipPackageWithFallback "browser-cookie3"
 
 if errorlevel 1 exit /b 1
 
+call :InstallPipPackageWithFallback "browsercookie"
+
+if errorlevel 1 exit /b 1
+
 call :InstallPipPackageWithFallback "beautifulsoup4"
 
 if errorlevel 1 exit /b 1
@@ -1491,7 +1545,15 @@ call :InstallPipPackageWithFallback "selenium"
 
 if errorlevel 1 exit /b 1
 
-"%PYTHON_EXE%" -c "import rich, textual, browser_cookie3, bs4, lxml, mutagen, selenium, sqlite3" >> "%INSTALL_LOG%" 2>&1
+call :InstallPipPackageWithFallback "gdown"
+
+if errorlevel 1 exit /b 1
+
+call :InstallPipPackageWithFallback "mega-lite"
+
+if errorlevel 1 exit /b 1
+
+"%PYTHON_EXE%" -c "import rich, textual, browser_cookie3, browsercookie, bs4, lxml, mutagen, selenium, gdown, mega_downloader, sqlite3" >> "%INSTALL_LOG%" 2>&1
 
 if errorlevel 1 exit /b 1
 

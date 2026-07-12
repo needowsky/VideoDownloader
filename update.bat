@@ -1,59 +1,302 @@
 @echo off
+
+
+
 setlocal
+
+
+
 set "APP_DIR=%~dp0"
+
+
+
 set "APP_DIR=%APP_DIR:~0,-1%"
+
+
+
 set "GITHUB_REPO=needowsky/VideoDownloader"
+
+
+
 set "LOG_DIR=%APP_DIR%\logs"
+
+
+
 set "UPDATE_LOG=%LOG_DIR%\update_log.txt"
+set "UPDATE_MODE=%~1"
+set "FORCE_UPDATE=0"
+if /I "%UPDATE_MODE%"=="force" set "FORCE_UPDATE=1"
+
+
+
+
+
+
 
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 
+
+
+
+
+
+
 net session >nul 2>nul
+
+
+
 if errorlevel 1 (
+
+
+
     echo Administrator permission is required to update files in this folder.
+
+
+
     echo Requesting administrator permission...
+
+
+
     set "ELEVATE_VBS=%TEMP%\vd_elevate_update.vbs"
+
+
+
     > "%ELEVATE_VBS%" echo Set UAC = CreateObject^("Shell.Application"^)
-    >> "%ELEVATE_VBS%" echo UAC.ShellExecute "%~f0", "", "%APP_DIR%", "runas", 1
+
+
+
+    >> "%ELEVATE_VBS%" echo UAC.ShellExecute "%~f0", "%*", "%APP_DIR%", "runas", 1
+
+
+
     cscript //nologo "%ELEVATE_VBS%" >nul 2>nul
+
+
+
     exit /b 0
+
+
+
 )
+
+
+
+
+
+
 
 cd /d "%APP_DIR%"
+
+
+
 if errorlevel 1 (
+
+
+
     echo Cannot enter app folder: %APP_DIR%
+
+
+
     pause
+
+
+
     exit /b 1
+
+
+
 )
 
+
+
+
+
+
+
 echo ================================================
+
+
+
 echo  Video Downloader updater
+
+
+
 echo ================================================
+
+
+
 echo.
+
+
+
 echo Closing app lock window...
+
+
+
 timeout /t 2 /nobreak >nul
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $repo='%GITHUB_REPO%'; $appDir=(Get-Location).Path; $log='%UPDATE_LOG%'; function Write-Log($m){ Add-Content -LiteralPath $log -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' ' + $m) }; function Get-Numbers($v){ $n=@([regex]::Matches([string]$v,'\d+') | ForEach-Object {[int]$_.Value}); if($n.Count -eq 0){ return @(0) }; return $n }; function Compare-Version($a,$b){ $av=Get-Numbers $a; $bv=Get-Numbers $b; $max=[Math]::Max($av.Count,$bv.Count); for($i=0;$i -lt $max;$i++){ $ai=0; $bi=0; if($i -lt $av.Count){ $ai=$av[$i] }; if($i -lt $bv.Count){ $bi=$bv[$i] }; if($ai -gt $bi){ return 1 }; if($ai -lt $bi){ return -1 } }; return 0 }; Write-Log 'Update started'; $api='https://api.github.com/repos/' + $repo + '/releases/latest'; Write-Host '[ 10%%] Checking latest release...'; $release=Invoke-RestMethod -Uri $api -Headers @{'User-Agent'='VideoDownloaderUpdater'}; $latest=([string]$release.name).Trim(); if(-not ($latest -match '\d')){ $latest=([string]$release.tag_name).Trim() }; if(-not $latest){ throw 'Latest release has no version name or tag.' }; $current=''; $programFile=Join-Path $appDir 'youtube_downloader.py'; if(Test-Path $programFile){ $line=Select-String -Path $programFile -Pattern 'APP_VERSION' | Select-Object -First 1; if($line){ $m=[regex]::Match($line.Line,'v?\d+(\.\d+)*'); if($m.Success){ $current=$m.Value.Trim() } } }; Write-Host ('Current version: ' + $(if($current){$current}else{'unknown'})); Write-Host ('Latest release: ' + $latest); if($current -and ((Compare-Version $latest $current) -le 0)){ Write-Host 'No update needed. Installed version is current or newer.'; Write-Log ('Skipped update. Current=' + $current + ' Latest=' + $latest); exit 2 }; $zipUrl=$release.zipball_url; if(-not $zipUrl){ throw 'Latest release does not contain source zip.' }; $work=Join-Path $env:TEMP ('vd_update_' + [guid]::NewGuid().ToString('N')); $zip=Join-Path $work 'release.zip'; $extract=Join-Path $work 'release'; New-Item -ItemType Directory -Force -Path $work | Out-Null; Write-Host '[ 30%%] Downloading update...'; Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -Headers @{'User-Agent'='VideoDownloaderUpdater'} -OutFile $zip; Write-Host '[ 55%%] Extracting files...'; Expand-Archive -Force -Path $zip -DestinationPath $extract; $root=Get-ChildItem -Path $extract -Directory | Select-Object -First 1; if(-not $root){ throw 'Release archive is empty.' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','gimmeacookie.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat','config/config.json','config/stats.json','config/lang/en.lang','config/lang/pl.lang','assets/video_downloader.ico','assets/video_downloader.png','aio_installer/VideoDownloader_AIO_Installer.py','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.exe','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.zip'); Write-Host '[ 75%%] Updating application files...'; foreach($file in $files){ $src=Join-Path $root.FullName $file; if(Test-Path $src){ $dest=Join-Path $appDir $file; $destDir=Split-Path -Parent $dest; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Copy-Item -Force -LiteralPath $src -Destination $dest; Write-Log ('Updated ' + $file) } else { Write-Log ('Skipped missing file in release: ' + $file) } }; Write-Host '[100%%] Update complete.'; Write-Log ('Update complete: ' + $latest); Start-Sleep -Seconds 1"
+
+
+
+
+
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $repo='%GITHUB_REPO%'; $appDir=(Get-Location).Path; $log='%UPDATE_LOG%'; function Write-Log($m){ Add-Content -LiteralPath $log -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' ' + $m) }; function Get-Numbers($v){ $n=@([regex]::Matches([string]$v,'\d+') | ForEach-Object {[int]$_.Value}); if($n.Count -eq 0){ return @(0) }; return $n }; function Compare-Version($a,$b){ $av=Get-Numbers $a; $bv=Get-Numbers $b; $max=[Math]::Max($av.Count,$bv.Count); for($i=0;$i -lt $max;$i++){ $ai=0; $bi=0; if($i -lt $av.Count){ $ai=$av[$i] }; if($i -lt $bv.Count){ $bi=$bv[$i] }; if($ai -gt $bi){ return 1 }; if($ai -lt $bi){ return -1 } }; return 0 }; Write-Log 'Update started'; Write-Host '[ 10%%] Checking highest application release...'; $api='https://api.github.com/repos/' + $repo + '/releases?per_page=50'; $releases=Invoke-RestMethod -Uri $api -Headers @{'User-Agent'='VideoDownloaderUpdater'}; $candidates=@(); foreach($r in $releases){ if($r.draft -or $r.prerelease){ continue }; $tag=([string]$r.tag_name).Trim(); $name=([string]$r.name).Trim(); if($tag -match '^\s*EXE[\s_-]+v?\d' -or $name -match '^\s*EXE[\s_-]+v?\d'){ continue }; $label=$tag; if($label -notmatch '\d'){ $label=$name }; if($label -match '\d'){ $nums=Get-Numbers $label; $key=($nums | ForEach-Object { $_.ToString('D8') }) -join '.'; $candidates += [pscustomobject]@{Key=$key; Label=$label; Release=$r} } }; if(-not $candidates){ throw 'No versioned application release found.' }; $selected=$candidates | Sort-Object Key -Descending | Select-Object -First 1; $release=$selected.Release; $latest=$selected.Label; $current=''; $programFile=Join-Path $appDir 'youtube_downloader.py'; if(Test-Path $programFile){ $line=Select-String -Path $programFile -Pattern 'APP_VERSION' | Select-Object -First 1; if($line){ $m=[regex]::Match($line.Line,'v?\d+(\.\d+)*'); if($m.Success){ $current=$m.Value.Trim() } } }; Write-Host ('Current version: ' + $(if($current){$current}else{'unknown'})); Write-Host ('Latest release: ' + $latest); if($current -and -not ('%FORCE_UPDATE%' -eq '1') -and ((Compare-Version $latest $current) -le 0)){ Write-Host 'No update needed. Installed version is current or newer.'; Write-Log ('Skipped update. Current=' + $current + ' Latest=' + $latest); exit 2 }; $zipUrl=$release.zipball_url; if(-not $zipUrl){ throw 'Selected release does not contain source zip.' }; $work=Join-Path $env:TEMP ('vd_update_' + [guid]::NewGuid().ToString('N')); $zip=Join-Path $work 'release.zip'; $extract=Join-Path $work 'release'; New-Item -ItemType Directory -Force -Path $work | Out-Null; Write-Host '[ 30%%] Downloading update...'; Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -Headers @{'User-Agent'='VideoDownloaderUpdater'} -OutFile $zip; Write-Host '[ 55%%] Extracting files...'; Expand-Archive -Force -Path $zip -DestinationPath $extract; $root=Get-ChildItem -Path $extract -Directory | Select-Object -First 1; if(-not $root){ throw 'Release archive is empty.' }; $files=@('youtube_downloader.py','uruchom_downloader.bat','gimmeacookie.bat','README.md','CHANGELOG.md','LICENSE','install.ps1','zainstaluj_wszystko.bat','update.bat','config/config.json','config/stats.json','config/lang/en.lang','config/lang/pl.lang','en.lang','pl.lang','assets/video_downloader.ico','assets/video_downloader.png','aio_installer/VideoDownloader_AIO_Installer.py','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.exe','aio_exe_release/VideoDownloader_AIO_Installer_EXE_3_5.zip'); Write-Host '[ 75%%] Updating application files...'; foreach($file in $files){ $src=Join-Path $root.FullName $file; if(Test-Path $src){ $dest=Join-Path $appDir $file; $destDir=Split-Path -Parent $dest; if($destDir){ New-Item -ItemType Directory -Force -Path $destDir | Out-Null }; Copy-Item -Force -LiteralPath $src -Destination $dest; Write-Log ('Updated ' + $file) } else { Write-Log ('Skipped missing file in release: ' + $file) } }; Write-Host '[100%%] Update complete.'; Write-Log ('Update complete: ' + $latest); Start-Sleep -Seconds 1"
+
+
+
+
+
+
 
 if errorlevel 2 (
+
+
+
     echo.
+
+
+
     echo No update needed. Installed version is current or newer.
+
+
+
     pause
+
+
+
     exit /b 0
+
+
+
 )
 
+
+
+
+
+
+
 if errorlevel 1 (
+
+
+
     echo.
+
+
+
     echo Update failed. Details:
+
+
+
     echo %UPDATE_LOG%
+
+
+
     pause
+
+
+
     exit /b 1
+
+
+
+)
+
+
+
+
+
+
+
+:UPDATE_LANG_ONLY
+echo.
+echo Updating language packs...
+if not exist "config" mkdir "config" >nul 2>nul
+
+
+
+if not exist "config\lang" mkdir "config\lang" >nul 2>nul
+
+
+
+if exist "en.lang" (
+
+
+
+    copy /Y "en.lang" "config\lang\en.lang" >nul 2>nul
+
+
+
+    del /Q "en.lang" >nul 2>nul
+
+
+
+)
+
+
+
+if exist "pl.lang" (
+
+
+
+    copy /Y "pl.lang" "config\lang\pl.lang" >nul 2>nul
+
+
+
+    del /Q "pl.lang" >nul 2>nul
+
+
+
+)
+
+
+
+
+
+
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Continue'; $ProgressPreference='SilentlyContinue'; $repo='%GITHUB_REPO%'; function Get-Numbers($v){ $n=@([regex]::Matches([string]$v,'\d+') | ForEach-Object {[int]$_.Value}); if($n.Count -eq 0){ return @(0) }; return $n }; $api='https://api.github.com/repos/' + $repo + '/releases?per_page=50'; $releases=Invoke-RestMethod -Uri $api -Headers @{'User-Agent'='VideoDownloaderUpdater'}; $candidates=@(); foreach($r in $releases){ if($r.draft -or $r.prerelease){ continue }; $tag=([string]$r.tag_name).Trim(); $name=([string]$r.name).Trim(); if($tag -match '^\s*EXE[\s_-]+v?\d' -or $name -match '^\s*EXE[\s_-]+v?\d'){ continue }; $label=$tag; if($label -notmatch '\d'){ $label=$name }; if($label -match '\d'){ $nums=Get-Numbers $label; $key=($nums | ForEach-Object { $_.ToString('D8') }) -join '.'; $candidates += [pscustomobject]@{Key=$key; Label=$label; Release=$r} } }; if(-not $candidates){ throw 'No versioned application release found.' }; $selected=$candidates | Sort-Object Key -Descending | Select-Object -First 1; $release=$selected.Release; $latest=$selected.Label; New-Item -ItemType Directory -Force -Path 'config\lang' | Out-Null; foreach($lang in @('en.lang','pl.lang')){ $asset=$release.assets | Where-Object { $_.name -ieq $lang } | Select-Object -First 1; if($asset -and $asset.browser_download_url){ Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='VideoDownloaderUpdater'} -Uri $asset.browser_download_url -OutFile (Join-Path 'config\lang' $lang) } }" >> "%UPDATE_LOG%" 2>&1
+
+
+
+
+
+
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Continue'; $ProgressPreference='SilentlyContinue'; $base='https://raw.githubusercontent.com/%GITHUB_REPO%/main/config/lang'; New-Item -ItemType Directory -Force -Path 'config\lang' | Out-Null; foreach($lang in @('en.lang','pl.lang')){ Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='VideoDownloaderUpdater'} -Uri ($base + '/' + $lang) -OutFile (Join-Path 'config\lang' $lang) }" >> "%UPDATE_LOG%" 2>&1
+
+if /I "%UPDATE_MODE%"=="lang" (
+    echo Language packs updated.
+    pause
+    exit /b 0
 )
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Continue'; $ProgressPreference='SilentlyContinue'; $base='https://raw.githubusercontent.com/%GITHUB_REPO%/main/assets'; New-Item -ItemType Directory -Force -Path 'assets' | Out-Null; foreach($file in @('video_downloader.ico','video_downloader.png')){ Invoke-WebRequest -UseBasicParsing -Uri ($base + '/' + $file) -OutFile (Join-Path 'assets' $file) }" >> "%UPDATE_LOG%" 2>&1
 
+
+
+
+
+
+
 echo.
+
+
+
 echo Update complete.
+
+
+
 echo You can start Video Downloader again.
+
+
+
 pause
+
+
+
 exit /b 0
+
+
+
